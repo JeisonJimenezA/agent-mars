@@ -1,168 +1,168 @@
 # MARS Framework
 
-**Modular Agent with Reflective Search** - Sistema autónomo para resolver desafíos de Machine Learning usando Monte Carlo Tree Search (MCTS).
+**Modular Agent with Reflective Search** - Autonomous system for solving Machine Learning challenges using Monte Carlo Tree Search (MCTS).
 
-## Estructura del Proyecto
+## Project Structure
 
 ```
 mars/
-├── main.py                 # Punto de entrada principal
-├── orchestrator.py         # Coordinador del flujo MCTS
-├── requirements.txt        # Dependencias
-├── .env.example            # Plantilla de configuración
+├── main.py                 # Main entry point
+├── orchestrator.py         # MCTS flow coordinator
+├── requirements.txt        # Dependencies
+├── .env.example            # Configuration template
 │
-├── agents/                 # Agentes especializados
-│   ├── base_agent.py       # Clase base para agentes
-│   ├── idea_agent.py       # Genera ideas de solución
-│   ├── coding_agent.py     # Implementa código
-│   ├── debug_agent.py      # Analiza y corrige errores
-│   ├── review_agent.py     # Revisa resultados de ejecución
-│   ├── modular_agent.py    # Descompone ideas en módulos
-│   ├── search_agent.py     # Búsqueda académica
-│   ├── solution_improver.py # Mejora soluciones existentes
-│   └── validation_agent.py # Verifica validación y fuga de datos
+├── agents/                 # Specialized agents
+│   ├── base_agent.py       # Base class for agents
+│   ├── idea_agent.py       # Generates solution ideas
+│   ├── coding_agent.py     # Implements code
+│   ├── debug_agent.py      # Analyzes and fixes errors
+│   ├── review_agent.py     # Reviews execution results
+│   ├── modular_agent.py    # Decomposes ideas into modules
+│   ├── search_agent.py     # Academic search
+│   ├── solution_improver.py # Improves existing solutions
+│   └── validation_agent.py # Verifies validation and data leakage
 │
-├── core/                   # Componentes centrales
-│   ├── config.py           # Configuración global
-│   ├── mcts.py             # Motor MCTS
-│   ├── tree_node.py        # Nodos del árbol de búsqueda
-│   └── challenge_loader.py # Carga de desafíos
+├── core/                   # Core components
+│   ├── config.py           # Global configuration
+│   ├── mcts.py             # MCTS engine
+│   ├── tree_node.py        # Search tree nodes
+│   └── challenge_loader.py # Challenge loader
 │
-├── execution/              # Ejecución de soluciones
-│   ├── executor.py         # Ejecuta scripts Python
-│   ├── validator.py        # Valida soluciones
-│   └── diff_editor.py      # Edición incremental de código
+├── execution/              # Solution execution
+│   ├── executor.py         # Executes Python scripts
+│   ├── validator.py        # Validates solutions
+│   └── diff_editor.py      # Incremental code editing
 │
-├── llm/                    # Integración con LLMs
-│   ├── deepseek_client.py  # Cliente DeepSeek/Anthropic
-│   ├── prompt_manager.py   # Gestión de prompts
-│   └── prompts/            # Plantillas de prompts
+├── llm/                    # LLM integration
+│   ├── deepseek_client.py  # DeepSeek/Anthropic client
+│   ├── prompt_manager.py   # Prompt management
+│   └── prompts/            # Prompt templates
 │
-├── memory/                 # Sistema de lecciones
-│   ├── lesson_pool.py      # Repositorio de lecciones aprendidas
-│   ├── lesson_extractor.py # Extrae lecciones de ejecuciones
-│   └── lesson_types.py     # Tipos de lecciones
+├── memory/                 # Lesson system
+│   ├── lesson_pool.py      # Learned lessons pool
+│   ├── lesson_extractor.py # Extracts lessons from executions
+│   └── lesson_types.py     # Lesson types
 │
-├── mle/                    # Preparación ML
-│   ├── eda_agent.py        # Análisis exploratorio
-│   └── task_prep.py        # Preparación de tareas
+├── mle/                    # ML preparation
+│   ├── eda_agent.py        # Exploratory data analysis
+│   └── task_prep.py        # Task preparation
 │
-├── utils/                  # Utilidades
-│   ├── file_manager.py     # Gestión de archivos
-│   ├── code_parser.py      # Análisis de código Python
-│   └── academic_search.py  # Búsqueda en papers
+├── utils/                  # Utilities
+│   ├── file_manager.py     # File management
+│   ├── code_parser.py      # Python code parsing
+│   └── academic_search.py  # Paper search
 │
-├── challenges/             # Definiciones de desafíos
-│   └── otto_group.txt      # Ejemplo: Clasificación Otto Group
+├── challenges/             # Challenge definitions
+│   └── otto_group.txt      # Example: Otto Group Classification
 │
-├── data/                   # Datos de desafíos (ignorado por git)
-├── outputs/                # Salidas generadas (ignorado por git)
-├── logs/                   # Registros de ejecución (ignorado por git)
-└── working/                # Directorio de trabajo (ignorado por git)
+├── data/                   # Challenge data (gitignored)
+├── outputs/                # Generated outputs (gitignored)
+├── logs/                   # Execution logs (gitignored)
+└── working/                # Working directory (gitignored)
 ```
 
-## Requisitos
+## Requirements
 
 - Python 3.10+
-- Clave API de DeepSeek o Anthropic
+- DeepSeek or Anthropic API Key
 
-## Instalación
+## Installation
 
 ```bash
-# Clonar repositorio
-git clone <url-del-repo>
+# Clone repository
+git clone <repo-url>
 cd mars
 
-# Crear entorno virtual
+# Create virtual environment
 python -m venv env
 source env/bin/activate  # Linux/Mac
 env\Scripts\activate     # Windows
 
-# Instalar dependencias
+# Install dependencies
 pip install -r requirements.txt
 
-# Configurar variables de entorno
+# Configure environment variables
 cp .env.example .env
-# Editar .env con tus claves API
+# Edit .env with your API keys
 ```
 
-## Configuración
+## Configuration
 
-Edita el archivo `.env`:
+Edit the `.env` file:
 
 ```env
-# Claves API (usar una de las dos)
-DEEPSEEK_API_KEY=tu-clave-api
-ANTHROPIC_API_KEY=tu-clave-api
-USE_ANTHROPIC=false  # true para usar Anthropic
+# API Keys (use one of the two)
+DEEPSEEK_API_KEY=your-api-key
+ANTHROPIC_API_KEY=your-api-key
+USE_ANTHROPIC=false  # true to use Anthropic
 
-# Directorios
+# Directories
 WORKING_DIR=./working
 OUTPUT_DIR=./outputs
 LOG_DIR=./logs
 
-# Hiperparámetros MCTS
-MCTS_KM=30       # Máximo de iteraciones
-MCTS_ND=10       # Intentos de depuración por nodo
-MCTS_NI=2        # Mejoras por nodo válido
+# MCTS Hyperparameters
+MCTS_KM=30       # Maximum iterations
+MCTS_ND=10       # Debug attempts per node
+MCTS_NI=2        # Improvements per valid node
 MAX_EXECUTION_TIME=7200
 ```
 
-## Uso
+## Usage
 
-### Ejecutar un desafío
+### Run a challenge
 
 ```bash
 python main.py --challenge otto_group --data-dir ./data/otto-group --time-budget 3600
 ```
 
-**Parámetros:**
-- `--challenge`: Nombre del desafío (debe existir en `challenges/`)
-- `--data-dir`: Directorio con los datos CSV
-- `--time-budget`: Tiempo máximo en segundos (por defecto: 3600)
-- `--output-dir`: Directorio de salida (por defecto: ./working)
+**Parameters:**
+- `--challenge`: Challenge name (must exist in `challenges/`)
+- `--data-dir`: Directory with CSV data
+- `--time-budget`: Maximum time in seconds (default: 3600)
+- `--output-dir`: Output directory (default: ./working)
 
-### Crear un nuevo desafío
+### Create a new challenge
 
-1. Crear archivo en `challenges/nombre_desafio.txt` con:
-   - Objetivo
-   - Estructura del conjunto de datos
-   - Métrica de evaluación
-   - Formato de envío
+1. Create a file in `challenges/challenge_name.txt` with:
+   - Objective
+   - Dataset structure
+   - Evaluation metric
+   - Submission format
 
-2. Colocar datos en `data/nombre-desafio/`:
+2. Place data in `data/challenge-name/`:
    - `train.csv`
    - `test.csv`
 
-### Salidas
+### Outputs
 
-Después de ejecutar, encontrarás:
+After execution, you will find:
 
 ```
 working/
-├── metadata/           # EDA y divisiones de datos
-├── best_solution/      # Mejor solución encontrada
+├── metadata/           # EDA and data splits
+├── best_solution/      # Best solution found
 │   ├── main.py
-│   ├── *.py            # Módulos generados
+│   ├── *.py            # Generated modules
 │   └── solution_info.json
-├── lessons.json        # Lecciones aprendidas
-└── mcts_log.json       # Registro del árbol MCTS
+├── lessons.json        # Learned lessons
+└── mcts_log.json       # MCTS tree log
 ```
 
-## Flujo de Trabajo
+## Workflow
 
-1. **Carga**: Lee el desafío y prepara los datos
-2. **EDA**: Análisis exploratorio automático
-3. **MCTS**: Búsqueda de soluciones
-   - Genera ideas (IdeaAgent)
-   - Descompone en módulos (ModularAgent)
-   - Implementa código (CodingAgent)
-   - Ejecuta y valida (Executor)
-   - Depura si falla (DebugAgent)
-   - Extrae lecciones (LessonExtractor)
-4. **Mejora**: Itera sobre soluciones válidas
-5. **Resultado**: Guarda la mejor solución
+1. **Load**: Reads the challenge and prepares data
+2. **EDA**: Automatic exploratory analysis
+3. **MCTS**: Solution search
+   - Generates ideas (IdeaAgent)
+   - Decomposes into modules (ModularAgent)
+   - Implements code (CodingAgent)
+   - Executes and validates (Executor)
+   - Debugs if it fails (DebugAgent)
+   - Extracts lessons (LessonExtractor)
+4. **Improve**: Iterates on valid solutions
+5. **Result**: Saves the best solution
 
-## Licencia
+## License
 
 MIT
