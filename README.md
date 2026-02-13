@@ -9,7 +9,7 @@ mars/
 ├── main.py                 # Punto de entrada principal
 ├── orchestrator.py         # Coordinador del flujo MCTS
 ├── requirements.txt        # Dependencias
-├── .env.example            # Template de configuración
+├── .env.example            # Plantilla de configuración
 │
 ├── agents/                 # Agentes especializados
 │   ├── base_agent.py       # Clase base para agentes
@@ -20,7 +20,7 @@ mars/
 │   ├── modular_agent.py    # Descompone ideas en módulos
 │   ├── search_agent.py     # Búsqueda académica
 │   ├── solution_improver.py # Mejora soluciones existentes
-│   └── validation_agent.py # Verifica validación y data leakage
+│   └── validation_agent.py # Verifica validación y fuga de datos
 │
 ├── core/                   # Componentes centrales
 │   ├── config.py           # Configuración global
@@ -36,10 +36,10 @@ mars/
 ├── llm/                    # Integración con LLMs
 │   ├── deepseek_client.py  # Cliente DeepSeek/Anthropic
 │   ├── prompt_manager.py   # Gestión de prompts
-│   └── prompts/            # Templates de prompts
+│   └── prompts/            # Plantillas de prompts
 │
 ├── memory/                 # Sistema de lecciones
-│   ├── lesson_pool.py      # Pool de lecciones aprendidas
+│   ├── lesson_pool.py      # Repositorio de lecciones aprendidas
 │   ├── lesson_extractor.py # Extrae lecciones de ejecuciones
 │   └── lesson_types.py     # Tipos de lecciones
 │
@@ -49,22 +49,22 @@ mars/
 │
 ├── utils/                  # Utilidades
 │   ├── file_manager.py     # Gestión de archivos
-│   ├── code_parser.py      # Parsing de código Python
+│   ├── code_parser.py      # Análisis de código Python
 │   └── academic_search.py  # Búsqueda en papers
 │
 ├── challenges/             # Definiciones de desafíos
-│   └── otto_group.txt      # Ejemplo: Otto Group Classification
+│   └── otto_group.txt      # Ejemplo: Clasificación Otto Group
 │
-├── data/                   # Datos de desafíos (gitignored)
-├── outputs/                # Salidas generadas (gitignored)
-├── logs/                   # Logs de ejecución (gitignored)
-└── working/                # Directorio de trabajo (gitignored)
+├── data/                   # Datos de desafíos (ignorado por git)
+├── outputs/                # Salidas generadas (ignorado por git)
+├── logs/                   # Registros de ejecución (ignorado por git)
+└── working/                # Directorio de trabajo (ignorado por git)
 ```
 
 ## Requisitos
 
 - Python 3.10+
-- API Key de DeepSeek o Anthropic
+- Clave API de DeepSeek o Anthropic
 
 ## Instalación
 
@@ -83,7 +83,7 @@ pip install -r requirements.txt
 
 # Configurar variables de entorno
 cp .env.example .env
-# Editar .env con tus API keys
+# Editar .env con tus claves API
 ```
 
 ## Configuración
@@ -91,9 +91,9 @@ cp .env.example .env
 Edita el archivo `.env`:
 
 ```env
-# API Keys (usar uno de los dos)
-DEEPSEEK_API_KEY=tu-api-key
-ANTHROPIC_API_KEY=tu-api-key
+# Claves API (usar una de las dos)
+DEEPSEEK_API_KEY=tu-clave-api
+ANTHROPIC_API_KEY=tu-clave-api
 USE_ANTHROPIC=false  # true para usar Anthropic
 
 # Directorios
@@ -103,7 +103,7 @@ LOG_DIR=./logs
 
 # Hiperparámetros MCTS
 MCTS_KM=30       # Máximo de iteraciones
-MCTS_ND=10       # Intentos de debug por nodo
+MCTS_ND=10       # Intentos de depuración por nodo
 MCTS_NI=2        # Mejoras por nodo válido
 MAX_EXECUTION_TIME=7200
 ```
@@ -119,16 +119,16 @@ python main.py --challenge otto_group --data-dir ./data/otto-group --time-budget
 **Parámetros:**
 - `--challenge`: Nombre del desafío (debe existir en `challenges/`)
 - `--data-dir`: Directorio con los datos CSV
-- `--time-budget`: Tiempo máximo en segundos (default: 3600)
-- `--output-dir`: Directorio de salida (default: ./working)
+- `--time-budget`: Tiempo máximo en segundos (por defecto: 3600)
+- `--output-dir`: Directorio de salida (por defecto: ./working)
 
 ### Crear un nuevo desafío
 
 1. Crear archivo en `challenges/nombre_desafio.txt` con:
    - Objetivo
-   - Estructura del dataset
+   - Estructura del conjunto de datos
    - Métrica de evaluación
-   - Formato de submission
+   - Formato de envío
 
 2. Colocar datos en `data/nombre-desafio/`:
    - `train.csv`
@@ -140,13 +140,13 @@ Después de ejecutar, encontrarás:
 
 ```
 working/
-├── metadata/           # EDA y splits de datos
+├── metadata/           # EDA y divisiones de datos
 ├── best_solution/      # Mejor solución encontrada
 │   ├── main.py
 │   ├── *.py            # Módulos generados
 │   └── solution_info.json
 ├── lessons.json        # Lecciones aprendidas
-└── mcts_log.json       # Log del árbol MCTS
+└── mcts_log.json       # Registro del árbol MCTS
 ```
 
 ## Flujo de Trabajo
@@ -158,7 +158,7 @@ working/
    - Descompone en módulos (ModularAgent)
    - Implementa código (CodingAgent)
    - Ejecuta y valida (Executor)
-   - Debug si falla (DebugAgent)
+   - Depura si falla (DebugAgent)
    - Extrae lecciones (LessonExtractor)
 4. **Mejora**: Itera sobre soluciones válidas
 5. **Resultado**: Guarda la mejor solución
