@@ -1,0 +1,42 @@
+==== Stage 1: Empirical Analysis ====
+Analyze the execution results of this ML solution to produce structured findings.
+
+# Execution Output
+{execution_output}
+
+# Review Findings (from ReviewAgent)
+{review_findings}
+
+# Solution Idea
+{idea}
+
+==== Task ====
+Produce a structured empirical analysis of the solution's performance.
+Focus on observable metrics and behaviors, not code structure.
+
+# Analysis Requirements
+1. **Performance Summary**: What metric was achieved? Is this good/bad for this task type?
+2. **Training Analysis**: Did training converge? Any signs of overfitting/underfitting?
+3. **Strengths**: What worked well based on the output? (e.g., fast inference, stable training)
+4. **Weaknesses**: What issues are visible? (e.g., high variance, slow training, warnings)
+5. **Quantitative Findings**: Extract specific numbers - metric value, training time, memory usage, etc.
+
+# Response Format
+Respond with the following sections:
+
+Performance Summary:
+[1-2 sentences on overall performance]
+
+Training Analysis:
+[2-3 sentences on training behavior]
+
+Strengths:
+- [Bullet points of what worked]
+
+Weaknesses:
+- [Bullet points of issues observed]
+
+Quantitative Findings:
+- Metric: [value]
+- Training time: [if available]
+- Other relevant numbers

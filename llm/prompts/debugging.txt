@@ -1,0 +1,101 @@
+==== Debug Lessons ====
+{lessons}
+
+==== Python Files ====
+The following Python files are already provided.
+{files}
+
+==== Execution Error ====
+{exec_result}
+
+==== Error Analysis ====
+{error_analysis}
+
+==== Task ====
+Your task is to fix the errors using MINIMAL, TARGETED code modifications.
+
+We use DIFF-BASED EDITING, which means you propose changes as OLD/NEW code pairs.
+
+# Requirements
+- Fix must be targeted and minimal
+- Do NOT change core logic or working code
+- Do NOT rewrite entire functions unless absolutely necessary
+- Apply knowledge from Debug Lessons (cite them: "Cite {lesson_id}")
+- Do NOT use try...except to suppress errors - fix the root cause
+- Each change must be implementable as a precise code diff
+
+# Response Format
+
+First, provide a brief natural language description:
+
+**Issue Description:**
+[What was wrong in the implementation]
+
+**Fix Strategy:**
+[How you will fix it - 1-2 sentences]
+
+Then, for each file that needs changes:
+
+**Fix [N]: [Brief Title]**
+Target File: [filename.py]
+Reasoning: [Why this fixes the error - cite lessons]
+
+Code Modification:
+```python
+# In [filename.py]:
+# OLD:
+[exact old code snippet - must appear EXACTLY ONCE in file]
+
+# NEW:
+[replacement code with the fix]
+```
+
+# Examples of Good Fixes
+
+**Fix 1: Add Missing Import**
+Target File: main.py
+Reasoning: ImportError indicates numpy was used but not imported
+```python
+# OLD:
+from sklearn.ensemble import RandomForestClassifier
+
+# NEW:
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+```
+
+**Fix 2: Correct File Path**
+Target File: main.py
+Reasoning: FileNotFoundError - file is in metadata/ subdirectory
+```python
+# OLD:
+train = pd.read_csv('train.csv')
+
+# NEW:
+train = pd.read_csv('metadata/train.csv')
+```
+
+**Fix 3: Fix Variable Name Typo**
+Target File: model.py
+Reasoning: AttributeError - typo in attribute name
+```python
+# OLD:
+self.optimzer.step()
+
+# NEW:
+self.optimizer.step()
+```
+
+# Critical Rules
+OLD code must be EXACT (including whitespace/indentation)
+OLD code must appear EXACTLY ONCE in the target file
+Keep changes minimal (1-10 lines per fix)
+Don't fix unrelated issues
+Preserve all formatting and indentation
+
+# What NOT to do
+Rewriting entire files
+Changing working code "to improve it"
+Multiple unrelated changes in one fix
+Adding try...except to hide the error
+Vague OLD code that appears multiple times

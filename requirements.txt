@@ -1,0 +1,36 @@
+# LLM & API
+openai>=1.12.0  # Compatible con DeepSeek API
+anthropic>=0.18.0  # Por si quieres usar Claude también
+tiktoken>=0.5.2
+
+# ML & Data Science
+pandas>=2.0.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+torch>=2.0.0
+torchvision>=0.15.0
+timm>=0.9.0  # Para modelos pre-entrenados
+
+# Computer Vision
+opencv-python>=4.8.0
+albumentations>=1.3.0
+Pillow>=10.0.0
+
+# HTTP Requests (for academic search APIs)
+requests>=2.31.0
+
+# Utilities
+python-dotenv>=1.0.0
+tqdm>=4.66.0
+joblib>=1.3.0
+pyyaml>=6.0
+jsonschema>=4.19.0
+
+# Code Analysis
+ast-comments>=1.1.2
+black>=23.0.0
+pyflakes>=3.1.0
+
+# Optional but recommended
+tensorboard>=2.14.0
+wandb>=0.15.0  # Para logging

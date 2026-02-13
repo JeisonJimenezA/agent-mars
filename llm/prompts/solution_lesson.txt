@@ -1,0 +1,46 @@
+==== Stage 2: Lesson Distillation ====
+Distill an actionable lesson by comparing solutions and empirical findings.
+
+==== Current Best Solution ====
+{best_solution}
+
+==== New Solution ====
+{new_solution}
+
+==== Code Differences ====
+{code_diff}
+
+==== Empirical Findings (from Stage 1) ====
+{empirical_findings_text}
+
+==== Task ====
+Your task is to distill a high-value "Lesson Learned" that can guide future solutions.
+
+# Guidelines
+- **Check Context:**
+  - If *Current Best Solution* exists: Comparative Analysis. Contrast
+    the algorithmic approach of the New vs. Current. Explain precisely *why*
+    the New Solution improves or degrades performance based on the empirical
+    findings and code differences.
+  - If *Current Best Solution* is missing: Empirical Analysis. Summarize
+    the findings and effectiveness of the New Solution based on its
+    execution results.
+- **Logic over Syntax:** Focus on algorithmic choices, data structures,
+  and architectural decisions. Ignore minor syntactic sugar unless it
+  affects performance.
+- **Causal Chain:** Use the code diff to trace exactly which changes
+  caused the observed performance shifts.
+- **Generalizability:** The final lesson must be abstract enough to apply
+  to similar problems in the future, not just this specific snippet.
+
+# Response Format
+- Title: A clear, memorable title for the lesson.
+- Summary: A brief, high-level overview of the methods or algorithmic
+  changes applied in the New Solution.
+- Empirical Findings: Analysis of the execution results. If comparing,
+  highlight the delta in performance (validation metric and execution
+  time) and the specific trade-offs observed.
+- Key Lesson: A standalone, actionable principle. Write this as a
+  heuristic or rule of thumb (e.g., "When handling sparse matrices,
+  prefer X over Y because..."). If a developer reads *only* this
+  paragraph, they should learn a technique to apply in their own work.

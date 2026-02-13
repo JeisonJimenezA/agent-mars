@@ -1,0 +1,46 @@
+==== Debug Lessons ====
+{lessons}
+
+==== Python Files ====
+The following Python files are already provided.
+{files}
+
+==== Task ====
+You are tasked with debugging a script failure. You should summarize the
+execution traceback and explain the root cause of the errors. You
+should apply the relevant knowledge provided in the Debug Lessons
+section to support your diagnosis. Whenever you apply a specific
+concept or solution from these lessons, you must immediately reference
+it by appending "Cite {{lesson_id}}" to the relevant statement. You
+can use Google Search as needed for debugging.
+
+Execution Traceback (`python runfile.py`):
+{exec_result}
+
+# Analysis Requirements
+Your analysis should include:
+
+1. **Error Type:** [ImportError|FileNotFoundError|AttributeError|etc.]
+
+2. **Root Cause:** 
+   Explain WHAT went wrong and WHY (not just symptoms)
+
+3. **Precise Location:**
+   - File: [filename.py]
+   - Approximate line/section
+   - Relevant code context (show the problematic line)
+
+4. **Impact Assessment:**
+   Is this a critical error or a minor issue?
+
+5. **Recommended Fix Strategy:**
+   Describe the MINIMAL change needed (1-2 sentences)
+
+6. **Relevant Lessons:**
+   Cite any applicable debug lessons
+
+# Critical Points
+- Focus on ROOT CAUSE, not just the error message
+- Be specific about which file and line
+- Identify the MINIMAL fix needed
+- Don't propose solutions yet, just diagnose

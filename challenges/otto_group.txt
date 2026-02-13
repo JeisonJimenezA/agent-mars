@@ -1,0 +1,64 @@
+Otto Group Product Classification Challenge
+
+OBJECTIVE:
+Classify products into correct categories based on provided features.
+
+DATASET:
+Files:
+- train.csv: Training data with labels
+- test.csv: Test data for predictions
+- sampleSubmission.csv: Example submission format
+
+Training Data Structure:
+- Samples: 61,878 rows
+- Columns: id, feat_1, feat_2, ..., feat_93, target
+- Features: 93 anonymous numerical features (feat_1 through feat_93)
+  * All features contain count data (non-negative integers)
+  * Feature meanings are not provided (anonymous)
+  * No metadata about what features represent
+- Target: Product category (Class_1, Class_2, ..., Class_9)
+  * 9 distinct classes
+  * Distribution varies across classes
+
+Test Data Structure:
+- Samples: 144,368 rows
+- Columns: id, feat_1, feat_2, ..., feat_93
+- No target column (must predict)
+
+EVALUATION:
+Metric: Multi-class logarithmic loss (logloss)
+Direction: Lower is better (minimize)
+
+Formula: -1/N * Σ(i=1 to N) Σ(j=1 to M) y_ij * log(p_ij)
+Where:
+- N = number of observations
+- M = number of classes (9)
+- y_ij = 1 if observation i belongs to class j, 0 otherwise
+- p_ij = predicted probability that observation i belongs to class j
+
+Notes:
+- All predicted probabilities must sum to 1.0 for each observation
+- Confident wrong predictions are heavily penalized
+- Well-calibrated probabilities are essential
+
+SUBMISSION FORMAT:
+File: submission.csv
+Columns: id, Class_1, Class_2, Class_3, Class_4, Class_5, Class_6, Class_7, Class_8, Class_9
+- Each row must contain probabilities for all 9 classes
+- Probabilities must sum to 1.0
+- Example line: 1,0.1,0.05,0.05,0.2,0.15,0.1,0.15,0.1,0.1
+
+VALIDATION:
+Use stratified cross-validation to ensure class balance in splits.
+Print validation metric as: "Final Validation Metric: <value>"
+
+LEADERBOARD:
+- Top scores: ~0.38 (1st place)
+- Strong scores: ~0.42 (top 10%)
+- Good scores: ~0.50 (top 25%)
+- Baseline: ~0.55
+
+CONSTRAINTS:
+- Maximum execution time per run: 10 minutes
+- Must handle all 61,878 training samples
+- Must generate predictions for all 144,368 test samples
