@@ -1,3 +1,9 @@
+==== Problem Description ====
+{problem_description}
+
+==== EDA Report ====
+{eda_report}
+
 ==== Previous Ideas ====
 {previous_ideas}
 
@@ -10,7 +16,7 @@
 ==== Task ====
 Using the insights from the lessons learned during solution development,
 your task is to propose an optimized strategy to solve the problem
-more effectively. You must synthesize the provided "Lessons" to
+described above more effectively. You must synthesize the provided "Lessons" to
 propose a structural evolution of the "Previous Ideas".
 
 If "Discovered Models" are provided above, you may reference them for 

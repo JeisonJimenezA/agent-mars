@@ -76,29 +76,31 @@ class FileManager:
     
     def copy_input_data(self, solution_dir: Path, input_source: Path):
         """
-        Copy or symlink input data to solution directory.
-        
+        Copy input data files directly to solution directory root.
+
         Args:
             solution_dir: Target directory
             input_source: Source input data directory
         """
         if not input_source.exists():
             return
-        
+
+        # Copy CSV files directly to solution root for easy access
+        # This matches the expected paths in generated code (train.csv, test.csv, etc.)
+        for file_path in input_source.iterdir():
+            if file_path.is_file():
+                target_file = solution_dir / file_path.name
+                if not target_file.exists():
+                    shutil.copy2(file_path, target_file)
+
+        # Also create input/ symlink for backward compatibility
         target_input = solution_dir / "input"
-        
-        # Use symlink for efficiency (large datasets)
-        if target_input.exists():
-            if target_input.is_symlink():
-                target_input.unlink()
-            else:
-                shutil.rmtree(target_input)
-        
-        try:
-            target_input.symlink_to(input_source.absolute(), target_is_directory=True)
-        except OSError:
-            # Fallback to copying if symlink fails (Windows)
-            shutil.copytree(input_source, target_input)
+        if not target_input.exists():
+            try:
+                target_input.symlink_to(input_source.absolute(), target_is_directory=True)
+            except OSError:
+                # Fallback to copying if symlink fails (Windows)
+                shutil.copytree(input_source, target_input)
     
     def create_working_subdirs(self, solution_dir: Path):
         """

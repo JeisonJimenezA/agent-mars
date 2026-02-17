@@ -294,17 +294,17 @@ class IdeaAgent(BaseAgent):
             CurriculumStage.BASELINE: """
 == CURRICULUM STAGE: BASELINE ==
 Focus on SIMPLE, PROVEN approaches:
-- Use well-established models (e.g., LogisticRegression, RandomForest, XGBoost)
+- Choose the most appropriate model family for this specific problem
 - Minimal feature engineering
 - Standard preprocessing (scaling, encoding)
-- Avoid complex ensembles or deep learning unless clearly needed
+- Prioritize simplicity and fast iteration
 - Goal: Establish a solid baseline that works reliably
 """,
             CurriculumStage.STANDARD: """
 == CURRICULUM STAGE: STANDARD ==
 Now explore STANDARD ML techniques:
-- Try different model families (tree-based, linear, neural)
-- Basic feature engineering (interactions, polynomial features)
+- Try different model families based on problem characteristics
+- Basic feature engineering (interactions, transformations)
 - Hyperparameter tuning (grid/random search)
 - Cross-validation strategies
 - Goal: Improve upon baseline with standard techniques
@@ -315,7 +315,7 @@ Time for ADVANCED optimizations:
 - Advanced feature engineering (target encoding, embeddings)
 - Model-specific optimizations (learning rate schedules, regularization)
 - Advanced preprocessing (dimensionality reduction, feature selection)
-- Domain-specific augmentations
+- Domain-specific techniques
 - Goal: Push performance with sophisticated techniques
 """,
             CurriculumStage.ENSEMBLE: """
@@ -439,16 +439,16 @@ Describe your solution idea in 5-8 sentences. Include:
         return "\n".join(formatted)
     
     def _format_models_context(self, models: List[Dict[str, str]]) -> str:
-        """Format discovered models as context"""
+        """Format discovered models as context with full descriptions (no truncation)"""
         if not models:
             return "No model information available."
-        
+
         formatted = "DISCOVERED MODELS:\n"
         for i, model in enumerate(models, 1):
             formatted += f"{i}. {model['name']}\n"
             formatted += f"   Reasoning: {model.get('reasoning', 'N/A')}\n"
-            formatted += f"   Description: {model.get('description', 'N/A')[:100]}...\n\n"
-        
+            formatted += f"   Description: {model.get('description', 'N/A')}\n\n"
+
         return formatted
     
     def _extract_citations(self, text: str) -> List[str]:

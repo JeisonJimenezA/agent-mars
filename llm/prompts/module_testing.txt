@@ -3,14 +3,91 @@ The following Python files are already provided. Do not modify them.
 {library_files}
 
 ==== Task ====
-Your task is to write code examples demonstrating how to instantiate and
-utilize the classes or functions from the provided Python files.
+Write a ROBUST unit test script that validates the provided Python modules.
 
-# Requirements
-- Optimize for Speed: Limit hyperparameters (e.g., reduce the number of
-epochs/steps, use a smaller dataset subset) to ensure the
-demonstration executes quickly.
-- Verify Logic: Include assertions or validation steps to confirm the
-correctness of complex classes and functions. \
-You may skip verification for trivial components, such as configuration
-classes.
+# CRITICAL REQUIREMENTS
+
+## 1. Environment Compatibility (MUST FOLLOW)
+- **NO EMOJIS**: Use only ASCII characters. Windows cp1252 encoding crashes on
+  emojis like ✓, ✗, 🚀. Use "PASSED", "FAILED", "OK" instead.
+- **NO PARQUET**: Do not test parquet functionality. Use CSV for any file tests.
+- **UTF-8 ENCODING**: Use `encoding='utf-8'` when opening files.
+
+## 2. Test Data
+- **CREATE MINIMAL INLINE DATA**: Generate small test data directly in the script.
+  Do NOT depend on external files that may not exist.
+- **HANDLE MISSING FILES**: Wrap file operations in try/except. If files are
+  missing, create mock data or skip that test gracefully.
+- **SMALL DATA ONLY**: Use 10-100 rows maximum for test DataFrames.
+
+## 3. Assertions (CRITICAL)
+- **TEST STRUCTURE, NOT VALUES**: Assert on types, shapes, and ranges - not
+  specific numeric values that may change.
+
+  ```python
+  # GOOD assertions:
+  assert isinstance(result, pd.DataFrame), "Should return DataFrame"
+  assert len(predictions) == len(test_data), "Prediction count mismatch"
+  assert 0 <= score <= 1, "Score should be normalized"
+  assert result.shape[1] == n_features, "Feature count should match"
+
+  # BAD assertions (will break):
+  assert score == 0.8523  # Specific value will change!
+  assert result.iloc[0, 0] == 1.234  # Data-dependent!
+  ```
+
+## 4. Output Format
+- Print clear status for each test: `"TEST test_name: PASSED"` or `"TEST test_name: FAILED - reason"`
+- At the end, print `"ALL TESTS PASSED"` if everything works, or list failures.
+- Use plain print statements, no logging frameworks.
+
+## 5. Error Handling
+- Catch exceptions and report them clearly, don't let the script crash silently.
+- If a module import fails, report which module and why.
+
+# Example Test Structure
+```python
+import sys
+import traceback
+
+def test_config_module():
+    """Test configuration module."""
+    try:
+        from config import Config
+        assert hasattr(Config, 'SEED'), "Config should have SEED"
+        print("TEST test_config_module: PASSED")
+        return True
+    except Exception as err:
+        print(f"TEST test_config_module: FAILED - " + str(err))
+        return False
+
+def test_data_loader():
+    """Test data loading with mock data."""
+    try:
+        import pandas as pd
+        # Create mock data instead of loading files
+        mock_data = pd.DataFrame({{
+            'feature1': [1, 2, 3, 4, 5],
+            'feature2': [0.1, 0.2, 0.3, 0.4, 0.5],
+            'target': [0, 1, 0, 1, 0]
+        }})
+        assert len(mock_data) == 5, "Mock data should have 5 rows"
+        print("TEST test_data_loader: PASSED")
+        return True
+    except Exception as err:
+        print(f"TEST test_data_loader: FAILED - " + str(err))
+        return False
+
+if __name__ == "__main__":
+    results = []
+    results.append(test_config_module())
+    results.append(test_data_loader())
+
+    if all(results):
+        print("ALL TESTS PASSED")
+    else:
+        print(f"TESTS FAILED: {{results.count(False)}} failures")
+        sys.exit(1)
+```
+
+Please provide the complete test script in a Python code block.

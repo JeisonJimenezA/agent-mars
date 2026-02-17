@@ -49,13 +49,44 @@ class ModularAgent(BaseAgent):
         
         # Parse JSON response
         modules = self.extract_json_from_response(response["content"])
-        
+
         if modules:
+            # Normalize descriptions to strings (LLM sometimes returns dicts)
+            modules = self._normalize_module_descriptions(modules)
             self.log(f"Decomposed into {len(modules)} modules: {list(modules.keys())}")
             return modules
         else:
             self.log("Failed to parse module decomposition")
             return None
+
+    def _normalize_module_descriptions(self, modules: Dict) -> Dict[str, str]:
+        """
+        Normalize module descriptions to ensure they are all strings.
+        LLM sometimes returns nested dicts instead of plain strings.
+        """
+        normalized = {}
+        for name, desc in modules.items():
+            if isinstance(desc, dict):
+                # Extract description from common keys
+                desc_str = desc.get('purpose', '') or desc.get('description', '') or ''
+                # Include other relevant info if available
+                if 'functions' in desc:
+                    funcs = desc['functions']
+                    if isinstance(funcs, list):
+                        desc_str += f" Functions: {', '.join(funcs)}."
+                if 'classes' in desc:
+                    classes = desc['classes']
+                    if isinstance(classes, list):
+                        desc_str += f" Classes: {', '.join(classes)}."
+                # Fallback to string representation if still empty
+                if not desc_str.strip():
+                    desc_str = str(desc)
+                normalized[name] = desc_str
+            elif isinstance(desc, str):
+                normalized[name] = desc
+            else:
+                normalized[name] = str(desc)
+        return normalized
     
     def validate_decomposition(
         self,
@@ -89,7 +120,10 @@ class ModularAgent(BaseAgent):
         
         # Check for empty descriptions
         for name, desc in modules.items():
-            if not desc.strip():
+            # Handle both string and dict descriptions from LLM
+            if isinstance(desc, dict):
+                desc = desc.get('purpose', '') or desc.get('description', '') or str(desc)
+            if not isinstance(desc, str) or not desc.strip():
                 issues.append(f"Module '{name}' has empty description")
         
         is_valid = len(issues) == 0

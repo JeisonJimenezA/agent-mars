@@ -13,9 +13,13 @@ from pathlib import Path
 from typing import List, Dict, Optional
 from urllib.parse import quote_plus
 
-# Rate limiting: minimum 3s between requests (Semantic Scholar is strict)
+# Rate limiting: minimum 5s between requests (Semantic Scholar is very strict)
 _last_request_time: float = 0.0
-_RATE_LIMIT_SECONDS: float = 3.0
+_RATE_LIMIT_SECONDS: float = 5.0
+
+# Retry configuration for rate limiting (429 errors)
+_MAX_RETRIES: int = 3
+_BASE_BACKOFF_SECONDS: float = 5.0
 
 # ══════════════════════════════════════════════════════════════════════
 # PERSISTENT CACHE (prevents redundant API calls across sessions)
@@ -83,16 +87,55 @@ def _rate_limit():
 
 
 def _safe_get(url: str, timeout: int = 10, headers: Optional[Dict] = None) -> Optional[object]:
-    """Perform a GET request with error handling. Returns response or None."""
-    try:
-        import requests
-        _rate_limit()
-        resp = requests.get(url, timeout=timeout, headers=headers or {})
-        resp.raise_for_status()
-        return resp
-    except Exception as e:
-        print(f"  [AcademicSearch] Request failed for {url[:80]}...: {e}")
-        return None
+    """
+    Perform a GET request with exponential backoff for rate limiting.
+
+    Handles 429 (Too Many Requests) errors by waiting and retrying with
+    exponential backoff + jitter to avoid thundering herd.
+
+    Returns response object or None on failure.
+    """
+    import requests
+    import random
+
+    for attempt in range(_MAX_RETRIES):
+        try:
+            _rate_limit()
+            resp = requests.get(url, timeout=timeout, headers=headers or {})
+
+            # Handle rate limiting with exponential backoff
+            if resp.status_code == 429:
+                if attempt < _MAX_RETRIES - 1:
+                    # Exponential backoff with jitter: base * 2^attempt + random(0, 1)
+                    wait_time = _BASE_BACKOFF_SECONDS * (2 ** attempt) + random.uniform(0, 1)
+                    print(f"  [AcademicSearch] Rate limited (429), waiting {wait_time:.1f}s (attempt {attempt + 1}/{_MAX_RETRIES})")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"  [AcademicSearch] Rate limited after {_MAX_RETRIES} retries: {url[:60]}...")
+                    return None
+
+            resp.raise_for_status()
+            return resp
+
+        except requests.exceptions.Timeout:
+            if attempt < _MAX_RETRIES - 1:
+                wait_time = _BASE_BACKOFF_SECONDS * (2 ** attempt)
+                print(f"  [AcademicSearch] Timeout, retrying in {wait_time:.1f}s...")
+                time.sleep(wait_time)
+                continue
+            print(f"  [AcademicSearch] Timeout after {_MAX_RETRIES} retries: {url[:60]}...")
+            return None
+
+        except requests.exceptions.RequestException as e:
+            print(f"  [AcademicSearch] Request failed: {e}")
+            return None
+
+        except Exception as e:
+            print(f"  [AcademicSearch] Unexpected error: {e}")
+            return None
+
+    return None
 
 
 def _extract_model_from_title(title: str) -> str:
@@ -146,7 +189,7 @@ def search_semantic_scholar(query: str, limit: int = 5) -> List[Dict]:
         abstract = paper.get("abstract", "") or ""
         results.append({
             "title": title,
-            "snippet": abstract[:1500],
+            "snippet": abstract,  # Full abstract without truncation
             "model_name": _extract_model_from_title(title),
             "source": "semantic_scholar",
             "url": paper.get("url", ""),
@@ -185,7 +228,7 @@ def search_arxiv(query: str, limit: int = 5) -> List[Dict]:
             published_el = entry.find("atom:published", ns)
 
             title = title_el.text.strip().replace("\n", " ") if title_el is not None else ""
-            abstract = summary_el.text.strip().replace("\n", " ")[:1500] if summary_el is not None else ""
+            abstract = summary_el.text.strip().replace("\n", " ") if summary_el is not None else ""  # Full abstract
             link = link_el.text.strip() if link_el is not None else ""
             year = None
             if published_el is not None and published_el.text:
@@ -244,7 +287,7 @@ def search_papers_with_code(query: str, limit: int = 5) -> List[Dict]:
 
         results.append({
             "title": title,
-            "snippet": abstract[:1500],
+            "snippet": abstract,  # Full abstract without truncation
             "model_name": _extract_model_from_title(title),
             "source": "papers_with_code",
             "url": url_paper,

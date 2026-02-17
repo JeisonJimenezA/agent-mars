@@ -1,32 +1,28 @@
+==== Problem Description ====
+{problem_description}
+
 ==== Task ====
 Your task is to propose {num_model_candidates} distinct model
-architectures to solve the problem. **Action:** Use Google Search to
-research state-of-the-art and efficient architectures relevant to this
-domain.
+architectures to solve the problem described above. Research and propose
+the most appropriate approaches for THIS SPECIFIC problem.
 
 # Requirements
-- **Broad Diversity:** The candidates must represent different
-algorithmic families. Do not propose multiple variations of the same
-underlying method (e.g., do not suggest two different ResNets). Aim
-for a mix of:
-* Instance-Based / Kernel Methods (e.g., k-NN, SVM)
-* Tree-Based Ensembles (e.g., LightGBM, XGBoost, CatBoost)
-* Deep Learning (e.g., CNN, MLP, Transformers, RNNs)
+- **Problem-Driven Selection:** Analyze the problem characteristics first
+(data type, size, target variable, evaluation metric) and then propose
+models that are well-suited for those characteristics.
+- **Broad Diversity:** The candidates should represent different
+algorithmic families or approaches. Avoid proposing multiple variations
+of the same method.
 - **Problem Alignment:** Architectures must be specifically tailored to
-the data modality (e.g., tabular, image, time-series) and input
-structure.
-- **Hybridization:** Incorporate hybrid or ensemble designs if they offer
-a clear advantage for heterogeneous data.
-- **Efficiency First:** Prioritize "lightweight" designs. For each family,
-choose the architecture that offers the best trade-off between low
-computational cost (fast training/inference) and high performance.
-- **Data Constraints:** If the training data is limited, explicitly
-address regularization or low-complexity designs to prevent
-overfitting.
-- For each model, create a JSON object with the following two keys:
-- `reasoning`: Justification for why this architecture fits the
-constraints (efficiency, data size, and why it was chosen over others
-in its category).
+the data modality and problem structure. Consider what has worked well
+for similar problems.
+- **Efficiency First:** Prioritize designs that offer good trade-offs
+between computational cost and performance.
+- **Data Constraints:** If the training data is limited, address
+regularization or simpler designs to prevent overfitting.
+- For each model, create a JSON object with the following keys:
+- `reasoning`: Justification for why this architecture fits THIS
+specific problem (consider data characteristics, metric, constraints).
 - `description`: A technical description of the architecture and
 design philosophy.
 
@@ -35,12 +31,10 @@ Your response should be in the following JSON format in a single markdown
 code block (wrapped in ```):
 ```json
 [
-{{"reasoning": "k-NN is small and efficient...", "description": "We
-can use K-NN for this task..."}},
-{{"reasoning": "CNN is effective and efficient...", "description": "
-We can use CNN for this task..."}},
-{{"reasoning": "GBMs is an effective model...", "description": "We
-can use GBMs for this task..."}},
+{{"reasoning": "This approach is suitable because...", "description": "
+The model works by..."}},
+{{"reasoning": "This alternative offers...", "description": "
+This architecture uses..."}},
 ]
 ```
 

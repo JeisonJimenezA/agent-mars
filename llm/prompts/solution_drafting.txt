@@ -1,52 +1,108 @@
-==== Idea ====
+# MAIN SCRIPT IMPLEMENTATION (main.py)
+
+## CRITICAL RULES (READ FIRST - VIOLATIONS CAUSE CRASHES)
+
+### 1. Dataclass Mutable Defaults
+```python
+# WRONG: layers: List[int] = []
+# CORRECT: layers: List[int] = field(default_factory=list)
+```
+
+### 2. Environment Constraints
+- **NO EMOJIS**: ASCII only (Windows crashes on emoji)
+- **NO PARQUET**: Use `.to_csv()` only
+- **ENCODING**: Always use `encoding='utf-8'`
+
+### 3. API Compatibility
+- **LightGBM**: Use `callbacks=[lgb.early_stopping(100)]`
+- **y_train**: Must be 1D integer array, NOT one-hot
+
+### 4. Code Order (CRITICAL)
+```python
+# WRONG:
+class_weights = compute_weights(y=np.zeros(10))  # Dummy data!
+X_train, y_train = load_data()
+
+# CORRECT:
+X_train, y_train = load_data()  # Load FIRST
+class_weights = compute_weights(y=y_train)  # Then compute
+```
+
+---
+
+## OUTPUT FORMAT
+
+Provide COMPLETE working code in a single ```python block:
+
+```python
+# main.py
+# Your implementation here
+```
+
+The script must be executable with: `python main.py`
+
+---
+
+## YOUR TASK
+
+Create `main.py` - the orchestration script that:
+1. Loads and processes data
+2. Trains the model
+3. Validates performance
+4. Generates submission file
+
+---
+
+## REQUIRED OUTPUT
+
+The script MUST print:
+```
+Final Validation Metric: <value>
+```
+Without this line, the solution is considered invalid.
+
+---
+
+## CONTEXT
+
+### Problem Description
+{problem_description}
+
+### EDA Report
+{eda_report}
+
+### Solution Approach
 {idea}
 
-==== Python Files ====
-The following Python files are already provided. Do not modify them.
+### Data Locations
+- Training: `./train.csv`
+- Test: `./test.csv`
+- Metadata: `./metadata/`
+- Submission output: `./submission/submission.csv`
+
+---
+
+## AVAILABLE MODULES (import from these)
+
 {library_files}
 
-==== Target File Description (`runfile.py`) ====
-{file_description}
+---
 
-==== Task ====
-Your task is to implement the end-to-end orchestration script `runfile.py
-`. This script serves as a **fast baseline** to verify the idea. It
-must train the model, validate performance, perform failure analysis,
-and generate a submission.
+## IMPLEMENTATION REQUIREMENTS
 
-# Requirements
-- Import the functions or classes from the given Python files instead of
-re-implementing them.
-- Make the model training fast.
-- Limit maximum number of training samples and training steps/epochs
-to ensure a quick baseline execution.
-- Set appropriate batch sizes to prevent CUDA out-of-memory errors.
-- After training is complete, you must execute validation assessment,
-failure analysis, and submission generation.
-- You must load the hold-out validation dataset using the metadata
-located in the `./metadata` directory.
-- You must print the final validation metric computed on the entire
-hold-out validation set in this format `Final Validation Metric: <
-value>`. Without this metric, the solution cannot be evaluated,
-rendering the entire code invalid. You must use the validation metric
-defined in the Task Description. Please print the full precision of
-the validation metric without any rounding or formatting.
-- You must perform failure analysis on the trained model. You must
-perform failure analysis on the validation set to identify systematic
-error patterns. Calculate and print the correlation between the model'
-s error magnitude and the input features to reveal which variables are
-most associated with poor performance.
-- You must generate predictions for the entire test set and create
-the submission file{submission_cond}. Save the final predictions to
-`./submission/submission.csv`. Refer to the sample submission file (e.
-g., `./input/sample_submission.csv` or `./input/sampleSubmission.csv`)
-for the correct formatting required by the competition.
-- Optimize the validation inference speed.
-- Ensure the model is in evaluation mode for this inference.
-- Your code must automatically detect and utilize an available GPU
-for inference. Ensure the model and all data batches are moved to the
-correct device (GPU or CPU).
-- During inference, you don't need to compute gradients. Disabling
-this process reduces memory consumption and speeds up computation.
-- Call data loading functions with `load_cached_data=True` (if applicable)
-to utilize preprocessed data in the `./working` directory.
+1. **Import modules**: Use the modules above, don't reimplement
+2. **Fast training**: Limit samples and epochs for quick baseline
+3. **Caching**: Call data functions with `load_cached_data=True`
+4. **GPU support**: Auto-detect and use GPU if available
+5. **Validation**: Load hold-out set from `./metadata/` directory
+6. **Failure analysis**: Print error correlation with input features
+7. **Submission**: Save to `./submission/submission.csv` matching sample format
+
+### Performance Optimization
+- Use evaluation mode for inference
+- Disable gradients during inference (`torch.no_grad()`)
+- Set appropriate batch sizes to avoid OOM
+
+---
+
+Now implement the complete `main.py` script:

@@ -1,37 +1,60 @@
-==== Idea ====
+==== Problem ====
+{problem_description}
+
+==== Solution Idea ====
 {idea}
 
 ==== Task ====
-Your task is to design a modular repository structure to implement the
-given idea. Do not generate the full code yet; focus on the natural
-description of the **architectural logic**.
+Design a modular Python repository to implement this ML solution.
+You must decompose the solution into PYTHON FILES (modules).
 
-# Requirements
-- **Modularity:** Break the solution into logical modules based on
-functionality (e.g., data handling, core training and evaluation logic
-, utilities).
-- **Entry Point:** You must include a `main` module that acts as the entry
-point to execute the end-to-end pipeline.
-- **Detail:** For each module, the description must include:
-- The purpose of the module.
-- The names of specific classes or functions to be implemented.
-- A brief description of the implementation logic.
-- A brief explanation of how this module interacts with others.
-- **Ordering:** The JSON output must be ordered topologically (
-dependencies first, dependent modules last).
+# CRITICAL REQUIREMENTS
+
+1. **Python File Names**: Each module name must be a valid Python filename
+   (without .py extension). Use snake_case names like:
+   - config (configuration and hyperparameters)
+   - data_loader (data loading and preprocessing)
+   - feature_engineering (feature creation and transformation)
+   - model (model definition and training)
+   - evaluator (evaluation metrics and validation)
+   - utils (utility functions)
+   - main (REQUIRED - entry point script)
+
+2. **REQUIRED MODULE**: You MUST include a `main` module that:
+   - Acts as the entry point (python main.py)
+   - Orchestrates the full pipeline
+   - Produces the final output/predictions
+
+3. **Module Count**: Design 5-10 modules total (including main).
+   - Prefer MORE smaller modules over FEWER large modules
+   - Each module should have ONE clear responsibility
+   - Split complex modules: e.g., instead of one huge "model.py", use
+     "model_lgbm.py", "model_xgb.py", "model_ensemble.py"
+
+4. **MODULE SIZE LIMIT (CRITICAL)**:
+   - Each module description should result in code < 500 lines
+   - If a module would be larger, SPLIT IT into multiple modules
+   - Example splits:
+     - feature_engineering → feature_basic.py + feature_advanced.py
+     - model → model_base.py + model_lgbm.py + model_xgb.py
+     - data_loader → data_loader.py + data_preprocessor.py
+
+5. **Descriptions**: For each module, describe:
+   - Purpose (what it does)
+   - Key classes/functions to implement (2-4 max per module)
+   - How it interacts with other modules
 
 # Response Format
-Provide the output strictly as a JSON object in a single markdown code
-block. The keys should be the module names and the values should be
-the detailed descriptions. The module name must not include the `.py`
-extension.
+Return ONLY a JSON object in a code block. Keys are module names (without .py).
 
-Example Format:
 ```json
 {{
-"module_name": "Implements [Specific Class] to handle [Specific Task].
-includes functions like [func_a] and [func_b].",
-"main": "Orchestrates the workflow. Imports DataLoader from the data
-module and Model from the model module to run the pipeline."
+  "config": "Configuration module with hyperparameters, paths, and constants.",
+  "data_loader": "DataLoader class to load train/test CSV files, handle missing values, and split data.",
+  "model": "Model class implementing [algorithm]. Includes fit() and predict_proba() methods.",
+  "evaluator": "Evaluation functions for [metric]. Includes cross_validation() and score().",
+  "main": "Entry point that loads data via data_loader, trains model, evaluates, and saves predictions to submission.csv"
 }}
 ```
+
+IMPORTANT: Return ONLY the JSON block, no other text before or after.

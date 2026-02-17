@@ -3,8 +3,10 @@ from pathlib import Path
 from typing import Optional, Dict, List
 import time
 import json
+import re
 
 from core.config import Config
+from utils.debug_logger import get_debug_logger
 from core.mcts import MCTSEngine
 from core.tree_node import TreeNode, Solution, ActionType, NodeStatus, ExecutionResult
 from memory.lesson_pool import LessonPool
@@ -47,6 +49,16 @@ class MARSOrchestrator:
         # Initialize components
         self.mcts = MCTSEngine(time_budget=time_budget, lower_is_better=lower_is_better)
         self.lesson_pool = LessonPool()
+
+        # Load lessons from previous runs if they exist
+        lesson_path = self.working_dir / "lessons.json"
+        if lesson_path.exists():
+            try:
+                self.lesson_pool.load_from_file(lesson_path)
+                print(f"[Orchestrator] Loaded lessons from {lesson_path}")
+            except Exception as e:
+                print(f"[Orchestrator] Warning: Could not load lessons: {e}")
+
         self.lesson_extractor = LessonExtractor(self.lesson_pool)
 
         # Initialize agents
@@ -60,8 +72,9 @@ class MARSOrchestrator:
 
         # Initialize utilities
         self.file_manager = FileManager(self.working_dir)
-        self.executor = Executor(ExecutionConfig(timeout=600))
+        self.executor = Executor(ExecutionConfig(timeout=1800))
         self.validator = SolutionValidator()
+        self.debug_logger = get_debug_logger()
 
         # Statistics
         self.start_time = 0
@@ -273,6 +286,7 @@ class MARSOrchestrator:
                 module_desc,
                 implemented_modules,
                 self.lesson_pool,
+                eda_report=self.eda_report,
             )
 
             if code:
@@ -291,6 +305,7 @@ class MARSOrchestrator:
             idea,
             implemented_modules,
             self.lesson_pool,
+            eda_report=self.eda_report,
         )
         if not main_code:
             return False
@@ -382,6 +397,11 @@ class MARSOrchestrator:
         """
         Debug a buggy node **in-place** (Algorithm 2, lines 27-30).
 
+        Uses multiple strategies to fix errors:
+        1. Diff-based fix via DebugAgent (with fallbacks)
+        2. Direct file regeneration for the error file
+        3. Environment-specific fixes (emojis, parquet, etc.)
+
         Modifies node.solution directly so the next execution uses the fix.
         Returns True if a fix was generated, False otherwise.
         """
@@ -389,37 +409,122 @@ class MARSOrchestrator:
             return False
 
         error_output = node.execution_result.stderr or node.execution_result.error_message
+        all_files = node.solution.get_all_files()
 
-        # Analyze error
+        # ══════════════════════════════════════════════════════════════
+        # Strategy 1: Standard debug flow (diff-based with fallbacks)
+        # ══════════════════════════════════════════════════════════════
         error_analysis = self.debug_agent.analyze_error(
             self.problem_description,
-            node.solution.get_all_files(),
+            all_files,
             error_output,
             self.lesson_pool,
         )
-        if not error_analysis:
-            return False
 
-        # Generate fix
-        fixed_files = self.debug_agent.fix_error(
-            self.problem_description,
-            node.solution.get_all_files(),
-            error_output,
-            error_analysis,
-            self.lesson_pool,
-        )
-        if not fixed_files:
-            return False
+        if error_analysis:
+            fixed_files = self.debug_agent.fix_error(
+                self.problem_description,
+                all_files,
+                error_output,
+                error_analysis,
+                self.lesson_pool,
+            )
+            if fixed_files:
+                self._apply_fixes(node, fixed_files)
+                return True
 
-        # Apply fix in-place
+        # ══════════════════════════════════════════════════════════════
+        # Strategy 2: Direct regeneration of error file
+        # ══════════════════════════════════════════════════════════════
+        target_file = self._extract_error_file(error_output)
+        if target_file and target_file in all_files:
+            self.log(f"Strategy 2: Regenerating {target_file} directly")
+            regenerated = self.debug_agent.regenerate_file(
+                target_file=target_file,
+                original_code=all_files[target_file],
+                execution_error=error_output,
+                error_analysis=error_analysis or "Error analysis not available",
+            )
+            if regenerated:
+                self._apply_fixes(node, {target_file: regenerated})
+                return True
+
+        # ══════════════════════════════════════════════════════════════
+        # Strategy 3: Quick environment fixes (no LLM needed)
+        # ══════════════════════════════════════════════════════════════
+        if self._apply_environment_fixes(node, error_output):
+            self.log("Strategy 3: Applied environment fixes")
+            return True
+
+        self.log("All debug strategies failed")
+        return False
+
+    def _apply_fixes(self, node: TreeNode, fixed_files: Dict[str, str]):
+        """Apply fixes to a node's solution in-place."""
         for filename, code in fixed_files.items():
             if filename == "main.py":
                 node.solution.main_script = code
             else:
                 node.solution.modules[filename] = code
-
         self.log(f"Applied fix to {len(fixed_files)} files")
-        return True
+
+    def _extract_error_file(self, error: str) -> Optional[str]:
+        """Extract the filename that caused the error from traceback."""
+        import re
+        matches = re.findall(r'File\s+"[^"]*[\\/](\w+\.py)"', error)
+        if matches:
+            return matches[-1]  # Last match = deepest in call stack
+        return None
+
+    def _apply_environment_fixes(self, node: TreeNode, error: str) -> bool:
+        """
+        Apply quick environment-specific fixes without LLM.
+
+        Handles common issues:
+        - UnicodeEncodeError from emojis
+        - ImportError from pyarrow/parquet
+        """
+        import re
+        fixed_any = False
+        all_files = node.solution.get_all_files()
+
+        # Fix 1: Remove emojis causing UnicodeEncodeError
+        if "UnicodeEncodeError" in error and "charmap" in error:
+            emoji_pattern = re.compile(
+                "["
+                "\U0001F300-\U0001F9FF"
+                "\U00002600-\U000026FF"
+                "\U00002700-\U000027BF"
+                "\U0001F600-\U0001F64F"
+                "\U0001F680-\U0001F6FF"
+                "]+",
+                flags=re.UNICODE
+            )
+            for filename, code in all_files.items():
+                if emoji_pattern.search(code):
+                    cleaned = emoji_pattern.sub("", code)
+                    if filename == "main.py":
+                        node.solution.main_script = cleaned
+                    else:
+                        node.solution.modules[filename] = cleaned
+                    self.log(f"  Removed emojis from {filename}")
+                    fixed_any = True
+
+        # Fix 2: Replace parquet with CSV
+        if "pyarrow" in error.lower() or "parquet" in error.lower():
+            for filename, code in all_files.items():
+                if ".to_parquet(" in code or ".read_parquet(" in code:
+                    fixed_code = code.replace(".to_parquet(", ".to_csv(")
+                    fixed_code = fixed_code.replace(".read_parquet(", ".read_csv(")
+                    fixed_code = fixed_code.replace(".parquet", ".csv")
+                    if filename == "main.py":
+                        node.solution.main_script = fixed_code
+                    else:
+                        node.solution.modules[filename] = fixed_code
+                    self.log(f"  Replaced parquet with CSV in {filename}")
+                    fixed_any = True
+
+        return fixed_any
 
     def _extract_debug_lesson_inline(self, node: TreeNode, attempt: int):
         """Extract a debug lesson after an inline debugging attempt."""
@@ -485,10 +590,12 @@ class MARSOrchestrator:
             if self.data_dir and self.data_dir.exists():
                 self.file_manager.copy_input_data(test_dir, self.data_dir)
 
-            test_result = self.executor.execute_python_file(
+            # Use auto-install for module tests too
+            test_result = self.executor.execute_with_auto_install(
                 test_dir / f"test_{filename}",
                 working_dir=test_dir,
                 timeout=120,
+                max_install_attempts=2,
             )
 
             if test_result.success:
@@ -555,10 +662,12 @@ class MARSOrchestrator:
         # Create working subdirectories
         self.file_manager.create_working_subdirs(solution_dir)
 
-        # Execute main script
+        # Execute main script with auto-install for missing dependencies
         main_path = solution_dir / "main.py"
-        result = self.executor.execute_python_file(
-            main_path, working_dir=solution_dir
+        result = self.executor.execute_with_auto_install(
+            main_path,
+            working_dir=solution_dir,
+            max_install_attempts=3
         )
 
         # Set execution result on node
@@ -573,6 +682,15 @@ class MARSOrchestrator:
                 # Show last 500 chars of stderr for debugging
                 stderr_preview = result.stderr[-500:] if len(result.stderr) > 500 else result.stderr
                 self.log(f"Error details:\n{stderr_preview}")
+
+            # Debug logging - save full error context
+            self.debug_logger.log_execution_error(
+                node_id=node.id,
+                error_type=self._categorize_error(result.stderr or result.error_message),
+                error_message=result.error_message,
+                stderr=result.stderr or "",
+                code_files=node.solution.get_all_files() if node.solution else None
+            )
 
     def _review_execution(self, node: TreeNode):
         """
@@ -739,3 +857,53 @@ class MARSOrchestrator:
     def log(self, message: str):
         """Log message with orchestrator prefix."""
         print(f"[Orchestrator] {message}")
+
+    def _categorize_error(self, error_text: str) -> str:
+        """
+        Categorize an error for logging and analysis.
+
+        Returns a category string like:
+        - "ModuleNotFoundError"
+        - "SyntaxError"
+        - "RuntimeError"
+        - "DataError"
+        - "Unknown"
+        """
+        if not error_text:
+            return "Unknown"
+
+        error_lower = error_text.lower()
+
+        # Common error categories
+        if "modulenotfounderror" in error_lower or "no module named" in error_lower:
+            return "ModuleNotFoundError"
+        elif "syntaxerror" in error_lower:
+            return "SyntaxError"
+        elif "nameerror" in error_lower:
+            return "NameError"
+        elif "typeerror" in error_lower:
+            return "TypeError"
+        elif "valueerror" in error_lower:
+            return "ValueError"
+        elif "keyerror" in error_lower:
+            return "KeyError"
+        elif "indexerror" in error_lower:
+            return "IndexError"
+        elif "attributeerror" in error_lower:
+            return "AttributeError"
+        elif "filenotfounderror" in error_lower or "no such file" in error_lower:
+            return "FileNotFoundError"
+        elif "memoryerror" in error_lower or "out of memory" in error_lower:
+            return "MemoryError"
+        elif "cuda" in error_lower or "gpu" in error_lower:
+            return "CUDAError"
+        elif "timeout" in error_lower:
+            return "TimeoutError"
+        elif "unicodeencodeerror" in error_lower or "charmap" in error_lower:
+            return "EncodingError"
+        elif "importerror" in error_lower:
+            return "ImportError"
+        elif "connectionerror" in error_lower or "network" in error_lower:
+            return "NetworkError"
+        else:
+            return "RuntimeError"

@@ -72,9 +72,32 @@ class Config:
     @classmethod
     def validate(cls):
         """Validate critical configuration"""
-        if not cls.DEEPSEEK_API_KEY:
-            raise ValueError("DEEPSEEK_API_KEY not set in .env file")
-        
+        # Check that at least one LLM provider is configured
+        provider = os.getenv("LLM_PROVIDER", "").lower()
+        has_provider = False
+
+        # Ollama (local) - no API key needed
+        if provider == "ollama" or os.getenv("USE_OLLAMA", "").lower() == "true":
+            has_provider = True
+        if provider == "deepseek" or os.getenv("DEEPSEEK_API_KEY"):
+            has_provider = True
+        if provider == "openai" or os.getenv("OPENAI_API_KEY"):
+            has_provider = True
+        if provider == "anthropic" or os.getenv("ANTHROPIC_API_KEY"):
+            has_provider = True
+        if provider == "gemini" or os.getenv("GOOGLE_GENAI_API_KEY") or os.getenv("GEMINI_API_KEY"):
+            has_provider = True
+
+        if not has_provider:
+            raise ValueError(
+                "No LLM provider configured. Set LLM_PROVIDER and the corresponding API key:\n"
+                "  - ollama: No API key needed (local)\n"
+                "  - deepseek: DEEPSEEK_API_KEY\n"
+                "  - openai: OPENAI_API_KEY\n"
+                "  - anthropic: ANTHROPIC_API_KEY\n"
+                "  - gemini: GOOGLE_GENAI_API_KEY or GEMINI_API_KEY"
+            )
+
         if not cls.PROMPT_DIR.exists():
             raise ValueError(f"Prompt directory not found: {cls.PROMPT_DIR}")
     

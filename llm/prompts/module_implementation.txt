@@ -1,54 +1,104 @@
-==== Idea ====
+# PYTHON MODULE IMPLEMENTATION
+
+## CRITICAL RULES (READ FIRST - VIOLATIONS CAUSE CRASHES)
+
+### 1. Dataclass Mutable Defaults (MOST COMMON ERROR)
+```python
+# WRONG - WILL CRASH:
+@dataclass
+class Config:
+    layers: List[int] = []           # CRASHES!
+    params: Dict = {{}}               # CRASHES!
+
+# CORRECT:
+from dataclasses import dataclass, field
+@dataclass
+class Config:
+    layers: List[int] = field(default_factory=list)
+    params: Dict = field(default_factory=dict)
+```
+
+### 2. Encoding & Characters
+- **NO EMOJIS**: Use ASCII only. Windows crashes on emoji characters.
+- **FILE ENCODING**: Always use `encoding='utf-8'` when opening files.
+- **NO PARQUET**: Use `.to_csv()` not `.to_parquet()` (PyArrow not installed).
+
+### 3. Data Types
+- **y_train**: Must be 1D integer array (0, 1, 2...), NOT one-hot, NOT probabilities.
+- **Statistics**: Never compute class_weights with placeholder data. Load real data first.
+
+### 4. API Compatibility
+- **LightGBM**: Use `callbacks=[lgb.early_stopping(100)]` not `early_stopping_rounds=`
+- **XGBoost**: Use 1D integer labels for multiclass, not one-hot.
+
+---
+
+## OUTPUT FORMAT
+
+Provide COMPLETE working code in a single ```python block:
+
+```python
+# {file_name}
+# Your implementation here
+```
+
+**SIZE LIMIT**: Keep under 400 lines. Prioritize working code over comprehensive code.
+
+---
+
+## YOUR TASK
+
+Implement module: `{file_name}`
+
+**Description**: {file_description}
+
+---
+
+## CONTEXT
+
+### Problem Description
+{problem_description}
+
+### EDA Report
+{eda_report}
+
+### Solution Approach
 {idea}
 
-==== Python Files ====
-The following Python files are already provided. Do not modify them.
+### Data Locations
+- Training: `./train.csv`
+- Test: `./test.csv`
+- Sample submission: `./sample_submission.csv` or `./input/sample_submission.csv`
+- Cache directory: `./working/cache/`
+
+---
+
+## EXISTING MODULES (import from these, do not reimplement)
+
 {library_files}
 
-==== Target File Description ({file_name}) ====
-{file_description}
+---
 
-==== Task ====
-Your task is to implement the `{file_name}` module based on the
-description above.
+## IMPLEMENTATION REQUIREMENTS
 
-# Requirements
-- Import the functions or classes from the given Python files instead of
-re-implementing them.
-- Only implement the module class/functions. DO NOT include an if `
-__name__ == "__main__":` block. DO NOT implement the end-to-end
-pipeline.
-- Ensure functions accept arguments for flexibility. You must include
-hyperparameters to control dataset size (for debugging) and training
-steps/epochs.
-- When printing validation metrics, please print the full precision
-without any rounding or formatting.
-- If loading raw data, use the metadata in `./metadata` to identify the
-correct train/val/test splits.
-- If this module performs deterministic data processing, you must
-implement a caching mechanism strictly following this logic:
-  - **Function Signature:** The processing function must accept a 
-    `load_cached_data: bool` argument.
-  - **Directory Safety:** Ensure the cache directory exists in 
-    `./working/cache/` (use `os.makedirs('./working/cache/', exist_ok=True)`).
-  - **Prohibited:** Do NOT use `pickle`. Use `parquet` (via pandas) or 
-    `npy` (via numpy).
-  - **Logic Flow:**
-    1. IF `load_cached_data` is True: Try to load the file from `./working/cache/`.
-    2. IF loading fails (file missing or corrupt) OR `load_cached_data` is False:
-       - Compute/process the data from scratch.
-       - Save the result to `./working/cache/` for future runs.
-    3. Return the data.
-- If this module handles model training:
-  - **Metrics:** Print key training and validation metrics during
-    training process.
-  - **Optimization:** Implement Early Stopping to prevent overfitting
-    and reduce runtime.
-- If this module handles submission generation:
-  - Generate predictions for the entire test set. Save the final
-    predictions to `./submission/submission.csv`.
-  - Refer to the sample submission file (e.g., `./input/sample_submission.csv` 
-    or `./input/sampleSubmission.csv`) for the correct formatting required 
-    by the competition.
+1. **Imports**: Import from existing modules above, don't reimplement.
+2. **No main block**: Do NOT include `if __name__ == "__main__":`
+3. **Hyperparameters**: Include arguments for dataset size and training steps.
+4. **Metrics**: Print full precision without rounding.
 
-Please provide the complete implementation in a Python code block.
+### If this module loads data:
+- Use `load_cached_data: bool` parameter
+- Cache to `./working/cache/` using CSV or NPY (NO pickle, NO parquet)
+- Create cache dir: `os.makedirs('./working/cache/', exist_ok=True)`
+
+### If this module trains models:
+- Print training/validation metrics during training
+- Implement Early Stopping
+
+### If this module generates submissions:
+- Save to `./submission/submission.csv`
+- Match format from sample submission file
+
+---
+
+Now implement the complete `{file_name}` module:
