@@ -31,7 +31,10 @@ specific implementation details. Your response should cover the
 following aspects:
 - Model: Describe the model architecture's design and key components.
 - Data: Describe the necessary steps to preprocess data for both training
-and evaluation.
+and evaluation. IMPORTANT: all preprocessing (scaling, encoding,
+imputation) must be fit exclusively on the training set and then
+applied separately to validation and test — never fit on the full
+dataset or test set (data leakage).
 - Training: Outline the training procedure, including key techniques (e.g
 ., loss functions, optimizers, or training strategies).
 - Evaluation: Describe the process for generating predictions on the test

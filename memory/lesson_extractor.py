@@ -7,7 +7,7 @@ import difflib
 from memory.lesson_types import SolutionLesson, DebugLesson, LessonType
 from memory.lesson_pool import LessonPool
 from core.tree_node import TreeNode
-from llm.deepseek_client import get_client
+from llm.llm_client import get_client
 from llm.prompt_manager import get_prompt_manager
 
 class LessonExtractor:
@@ -83,8 +83,8 @@ class LessonExtractor:
                     {"role": "system", "content": "You are an expert ML engineer distilling lessons from solution comparisons."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
-                max_tokens=1500,
+                temperature=0.1,
+                max_tokens=8000,
             )
 
             # Parse response
@@ -156,8 +156,8 @@ class LessonExtractor:
                     {"role": "system", "content": "You are an expert ML engineer analyzing execution results."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.5,
-                max_tokens=800,
+                temperature=0,
+                max_tokens=8000,
             )
             return response["content"].strip()
         except Exception as e:
@@ -210,8 +210,8 @@ class LessonExtractor:
                     {"role": "system", "content": "You are an expert Python debugger."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
-                max_tokens=1200,
+                temperature=0.1,
+                max_tokens=8000,
             )
             
             # Parse response

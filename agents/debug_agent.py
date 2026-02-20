@@ -76,7 +76,7 @@ You excel at diagnosing errors and proposing targeted fixes."""
         # Call LLM - usar max tokens del modelo (8192)
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.6,
+            temperature=0,
             max_tokens=Config.MAX_TOKENS
         )
         
@@ -139,7 +139,7 @@ You excel at diagnosing errors and proposing targeted fixes."""
         # Call LLM
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.7,
+            temperature=0.1,
             max_tokens=Config.MAX_TOKENS
         )
 
@@ -1082,7 +1082,7 @@ Output format:
 
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.5,
+            temperature=0.1,
             max_tokens=Config.MAX_TOKENS
         )
 
@@ -1185,7 +1185,7 @@ Output the fixed section in a ```python block:
 
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.5,
+            temperature=0,
             max_tokens=Config.MAX_TOKENS  # Use full token limit for surgical fixes
         )
 
@@ -1263,7 +1263,7 @@ Output in a ```python block:
 
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.5,
+            temperature=0.1,
             max_tokens=Config.MAX_TOKENS
         )
 

@@ -57,7 +57,7 @@ class SolutionImprover(BaseAgent):
         # Call LLM - usar max tokens del modelo (8192)
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.7,
+            temperature=0.3,
             max_tokens=Config.MAX_TOKENS
         )
         

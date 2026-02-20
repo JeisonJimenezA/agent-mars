@@ -43,8 +43,8 @@ class ModularAgent(BaseAgent):
         # Call LLM
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.6,
-            max_tokens=2000
+            temperature=0,
+            max_tokens=16000
         )
         
         # Parse JSON response

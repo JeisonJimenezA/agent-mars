@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Any
 from abc import ABC, abstractmethod
 import json
 
-from llm.deepseek_client import get_client
+from llm.llm_client import get_client
 from llm.prompt_manager import get_prompt_manager
 from utils.code_parser import CodeParser
 from utils.debug_logger import get_debug_logger

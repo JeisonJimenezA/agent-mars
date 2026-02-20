@@ -115,8 +115,8 @@ Respond in JSON format:
 
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.2,
-            max_tokens=600
+            temperature=0,
+            max_tokens=8000
         )
 
         keywords = self.extract_json_from_response(response["content"])
@@ -159,10 +159,10 @@ Respond in JSON format:
         
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.3,
-            max_tokens=500
+            temperature=0,
+            max_tokens=8000
         )
-        
+
         # Parse JSON
         task_info = self.extract_json_from_response(response["content"])
         
@@ -260,8 +260,8 @@ Respond with a JSON array of exactly 5 query strings:
 
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.4,
-            max_tokens=500
+            temperature=0.3,
+            max_tokens=8000
         )
 
         # Parse JSON array from response
@@ -510,8 +510,8 @@ Respond in JSON format:
         
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.7,
-            max_tokens=2000
+            temperature=0,
+            max_tokens=8000
         )
         
         # Parse JSON array

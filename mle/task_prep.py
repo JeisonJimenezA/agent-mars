@@ -4,7 +4,7 @@ from typing import Dict, Optional, Tuple
 import pandas as pd
 import json
 
-from llm.deepseek_client import get_client
+from llm.llm_client import get_client
 from llm.prompt_manager import get_prompt_manager
 from core.config import Config
 
@@ -51,8 +51,8 @@ class TaskPreparation:
                 {"role": "system", "content": "You are a helpful assistant that extracts information from task descriptions."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3,
-            max_tokens=500
+            temperature=0,
+            max_tokens=8000
         )
         
         # Parse JSON response

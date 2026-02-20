@@ -37,7 +37,9 @@ and execution speed.
 2. Feature engineering (new features, transformations, encoding)
 3. Model architecture tweaks (layers, regularization, dropout, activation)
 4. Training strategy (optimizer, scheduler, loss function, callbacks)
-5. Data preprocessing (scaling, imputation, augmentation)
+5. Data preprocessing (scaling, imputation, augmentation) — WARNING: any
+   preprocessing change must preserve the no-leakage rule: fit only on
+   train, transform val/test separately. Never refit on the full dataset.
 
 # Response Format
 Propose 1-3 modifications. For each:

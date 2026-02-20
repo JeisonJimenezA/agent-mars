@@ -6,7 +6,7 @@ from collections import defaultdict
 
 from memory.lesson_types import Lesson, SolutionLesson, DebugLesson, LessonType
 from core.config import Config
-from llm.deepseek_client import get_client
+from llm.llm_client import get_client
 from llm.prompt_manager import get_prompt_manager
 
 class LessonPool:
@@ -115,8 +115,8 @@ class LessonPool:
                     {"role": "system", "content": "You maintain a knowledge base of technical lessons."},
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0.2,
-                max_tokens=500,
+                temperature=0,
+                max_tokens=8000,
             )
 
             content = response.get("content", "")

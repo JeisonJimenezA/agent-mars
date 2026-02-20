@@ -4,7 +4,7 @@ from typing import Dict, Optional
 import pandas as pd
 import numpy as np
 
-from llm.deepseek_client import get_client
+from llm.llm_client import get_client
 from llm.prompt_manager import get_prompt_manager
 
 class EDAAgent:

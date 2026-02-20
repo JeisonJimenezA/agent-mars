@@ -137,10 +137,10 @@ class IdeaAgent(BaseAgent):
         
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.7,
-            max_tokens=1500
+            temperature=0.5,
+            max_tokens=16000
         )
-        
+
         idea = response["content"].strip()
         self.generated_ideas.append(idea)
         
@@ -229,7 +229,7 @@ class IdeaAgent(BaseAgent):
         response = self.call_llm(
             user_message=prompt,
             temperature=temperature,
-            max_tokens=2500
+            max_tokens=16000
         )
 
         idea = response["content"].strip()
@@ -338,9 +338,9 @@ Explore ENSEMBLE and META-LEARNING strategies:
         - STANDARD/ADVANCED: Higher temperature (0.8) for exploration
         """
         if stage in (CurriculumStage.BASELINE, CurriculumStage.ENSEMBLE):
-            return 0.6
+            return 0.3
         else:
-            return 0.8
+            return 0.7
     
     def _select_baseline_model(self, models: List[Dict[str, str]]) -> Dict[str, str]:
         """

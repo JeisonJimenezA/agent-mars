@@ -61,7 +61,7 @@ Your code must be syntactically valid Python that can be executed directly."""
         # Call LLM - usar max tokens del modelo (8192)
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.7,
+            temperature=0.2,
             max_tokens=Config.MAX_TOKENS
         )
         
@@ -127,7 +127,7 @@ REQUIREMENTS:
         try:
             response = self.call_llm(
                 user_message=fix_prompt,
-                temperature=0.3,
+                temperature=0,
                 max_tokens=Config.MAX_TOKENS
             )
 
@@ -165,10 +165,10 @@ REQUIREMENTS:
             prompt = self._create_main_fallback_prompt(
                 problem_description, idea, library_files
             )
-        
+
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.7,
+            temperature=0.2,
             max_tokens=Config.MAX_TOKENS
         )
 
@@ -215,7 +215,7 @@ REQUIREMENTS:
 
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.5,
+            temperature=0.2,
             max_tokens=Config.MAX_TOKENS,
         )
 

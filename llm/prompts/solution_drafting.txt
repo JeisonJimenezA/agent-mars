@@ -17,7 +17,29 @@
 - **LightGBM**: Use `callbacks=[lgb.early_stopping(100)]`
 - **y_train**: Must be 1D integer array, NOT one-hot
 
-### 4. Code Order (CRITICAL)
+### 4. DATA LEAKAGE PREVENTION (MANDATORY - causes invalid metrics if violated)
+
+- **Fit all preprocessing on train ONLY**: Scalers, encoders, imputers, feature
+  selectors must call `.fit()` or `.fit_transform()` exclusively on training data.
+  Use `.transform()` on validation and test sets.
+- **Do NOT re-merge train+val**: The splits in `./metadata/` (train.csv, val.csv)
+  are pre-separated. Never concatenate them back and re-split.
+- **No global statistics**: Never compute mean, std, mode, or any statistic from
+  the combined train+val+test data to use in preprocessing.
+- **Cross-validation**: If using CV inside training, apply ALL preprocessing
+  INSIDE each fold — never before the fold split.
+- **Target encoding / group stats**: Compute only from the training fold rows.
+  Never aggregate using validation or test labels.
+
+```python
+# CORRECT pattern for all preprocessing:
+scaler = StandardScaler().fit(X_train)      # fit on train ONLY
+X_train = scaler.transform(X_train)
+X_val   = scaler.transform(X_val)           # transform, never fit
+X_test  = scaler.transform(X_test)          # transform, never fit
+```
+
+### 5. Code Order (CRITICAL)
 ```python
 # WRONG:
 class_weights = compute_weights(y=np.zeros(10))  # Dummy data!

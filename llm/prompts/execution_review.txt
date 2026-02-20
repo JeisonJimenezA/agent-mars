@@ -24,8 +24,16 @@ in the Task Description.
 - The final validation metric is calculated incorrectly.
 - The final validation metric is not computed on the entire hold-out
 validation set.
-- There are signs of validation data leakage (e.g., the validation
-set was used in training).
+- There are signs of data leakage. Leakage patterns to detect:
+  * Scaler/encoder/imputer fitted on full data or val/test set
+    (e.g., `scaler.fit(X_all)` or `scaler.fit_transform(df)` before split)
+  * Global statistics (mean, std, mode) computed from all rows including
+    validation or test, then used in preprocessing
+  * Validation or test rows concatenated with train before preprocessing
+  * Feature selection (SelectKBest, PCA, etc.) fitted on full dataset
+  * Target encoding or group statistics computed using all rows
+  * Cross-validation with preprocessing applied before fold splitting
+  * Validation labels used during training in any way
 
 Code:
 ```

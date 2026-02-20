@@ -40,14 +40,17 @@ class OllamaClient:
             models = response.json().get("models", [])
             model_names = [m.get("name", "") for m in models]
 
-            # Check if our model is in the list (handle tag variations)
-            model_base = self.model_name.split(":")[0]
-            model_available = any(model_base in name for name in model_names)
+            # Cloud models (e.g. deepseek-v3.2:cloud) are not listed in /api/tags
+            # They are served remotely after 'ollama signin' — skip local check
+            is_cloud_model = self.model_name.endswith(":cloud")
+            if not is_cloud_model:
+                model_base = self.model_name.split(":")[0]
+                model_available = any(model_base in name for name in model_names)
 
-            if not model_available and models:
-                print(f"Warning: Model '{self.model_name}' not found locally.")
-                print(f"Available models: {model_names}")
-                print(f"Run: ollama pull {self.model_name}")
+                if not model_available and models:
+                    print(f"Warning: Model '{self.model_name}' not found locally.")
+                    print(f"Available models: {model_names}")
+                    print(f"Run: ollama pull {self.model_name}")
 
         except requests.exceptions.ConnectionError:
             raise ConnectionError(
@@ -81,7 +84,7 @@ class OllamaClient:
             "stream": False,
             "options": {
                 "num_predict": max_tokens or self.max_output_tokens,
-                "temperature": temperature if temperature is not None else 0.7,
+                "temperature": temperature if temperature is not None else 0,
             }
         }
 
@@ -173,7 +176,7 @@ class OllamaClient:
             "stream": False,
             "options": {
                 "num_predict": max_tokens or self.max_output_tokens,
-                "temperature": temperature if temperature is not None else 0.7,
+                "temperature": temperature if temperature is not None else 0,
             }
         }
 

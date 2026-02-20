@@ -31,6 +31,57 @@ class Config:
 - **LightGBM**: Use `callbacks=[lgb.early_stopping(100)]` not `early_stopping_rounds=`
 - **XGBoost**: Use 1D integer labels for multiclass, not one-hot.
 
+### 5. DATA LEAKAGE PREVENTION (MANDATORY - causes invalid metrics if violated)
+
+**Rule: Fit on train ONLY. Transform val/test separately.**
+```python
+# WRONG - LEAKAGE (fits scaler on all data, test statistics contaminate train):
+scaler = StandardScaler().fit(X_all)
+X_train_s = scaler.transform(X_train)
+
+# CORRECT:
+scaler = StandardScaler().fit(X_train)   # fit on train ONLY
+X_train_s = scaler.transform(X_train)
+X_val_s   = scaler.transform(X_val)
+X_test_s  = scaler.transform(X_test)
+```
+
+The same rule applies to ALL preprocessing objects:
+- `LabelEncoder`, `OrdinalEncoder`, `OneHotEncoder` -> fit on train, transform val/test
+- `SimpleImputer`, `KNNImputer` -> fit on train, transform val/test
+- `PCA`, `SelectKBest`, `TruncatedSVD` -> fit on train, transform val/test
+- Target encoding / group statistics -> compute from train fold only
+
+**Rule: No global statistics from the full dataset.**
+```python
+# WRONG - LEAKAGE (global mean includes validation/test rows):
+df['age_norm'] = (df['age'] - df['age'].mean()) / df['age'].std()
+
+# CORRECT:
+train_mean = X_train['age'].mean()
+train_std  = X_train['age'].std()
+X_train['age_norm'] = (X_train['age'] - train_mean) / train_std
+X_val['age_norm']   = (X_val['age']   - train_mean) / train_std
+X_test['age_norm']  = (X_test['age']  - train_mean) / train_std
+```
+
+**Rule: Cross-validation must apply preprocessing INSIDE each fold.**
+```python
+# WRONG - LEAKAGE (scaler fit on all folds before CV):
+X_scaled = scaler.fit_transform(X)
+for train_idx, val_idx in kf.split(X_scaled): ...
+
+# CORRECT:
+for train_idx, val_idx in kf.split(X):
+    scaler = StandardScaler().fit(X[train_idx])
+    X_tr = scaler.transform(X[train_idx])
+    X_vl = scaler.transform(X[val_idx])
+```
+
+**Rule: Never derive features from the target variable using full-dataset information.**
+- Group means/counts by target must be computed from train rows only.
+- Do NOT include columns that directly encode or trivially predict the target.
+
 ---
 
 ## OUTPUT FORMAT

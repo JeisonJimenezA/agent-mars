@@ -99,3 +99,5 @@ Changing working code "to improve it"
 Multiple unrelated changes in one fix
 Adding try...except to hide the error
 Vague OLD code that appears multiple times
+Introducing data leakage to "fix" a bug — never fit scalers/encoders
+on val/test data, even as a workaround for shape or dtype errors

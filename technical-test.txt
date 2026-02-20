@@ -1,0 +1,34 @@
+You are an expert deep learning engineer. Implement a complete PyTorch training 
+pipeline for emotion recognition using the RAVDESS dataset 
+(Ryerson Audio-Visual Database of Emotional Speech and Song).
+
+Dataset: RAVDESS
+- Download: https://zenodo.org/record/1188976
+- Use only AUDIO files (*.wav, speech only, not song)
+- 8 emotions: neutral, calm, happy, sad, angry, fearful, disgust, surprised
+- Extract features: log-mel spectrogram (n_mels=128, hop_length=512) using librosa
+
+Architecture: 
+- 1D CNN + BiGRU encoder for audio
+- Cross-entropy loss with class weights (RAVDESS is slightly imbalanced)
+- Output: 8-class emotion classifier
+
+Training requirements:
+- Mixed precision (torch.cuda.amp)
+- Gradient accumulation (steps=4)
+- Cosine annealing LR with warmup (warmup=10% of total steps)
+- Early stopping (patience=5, monitor val F1-macro)
+- Save/resume checkpoints
+
+Evaluation per epoch:
+- Loss, Accuracy, F1-macro, confusion matrix (use torchmetrics)
+
+Code quality:
+- Single .py file, runs end-to-end
+- Dataclass for all hyperparameters
+- Full type hints
+- Seed everything for reproducibility
+- Works on CPU/GPU/MPS
+
+Include a main() that trains for 30 epochs with batch_size=32.
+The code must run without errors from: python train_ravdess.py

@@ -57,8 +57,8 @@ class ValidationAgent(BaseAgent):
 
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.3,
-            max_tokens=800,
+            temperature=0,
+            max_tokens=8000,
         )
 
         # Parse JSON response

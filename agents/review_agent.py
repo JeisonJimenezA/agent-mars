@@ -54,8 +54,8 @@ class ReviewAgent(BaseAgent):
 
         response = self.call_llm(
             user_message=prompt,
-            temperature=0.3,
-            max_tokens=1000,
+            temperature=0,
+            max_tokens=8000,
         )
 
         review = self.extract_json_from_response(response["content"])
