@@ -10,6 +10,9 @@
 ==== Previous Ideas ====
 {previous_ideas}
 
+==== Execution Environment ====
+{hardware_context}
+
 ==== Task ====
 Your task is to propose a highly efficient **baseline approach** to solve
 the problem described above.

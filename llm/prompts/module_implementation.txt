@@ -116,11 +116,25 @@ Implement module: `{file_name}`
 ### Solution Approach
 {idea}
 
+### Execution Environment
+{hardware_context}
+
 ### Data Locations
-- Training: `./train.csv`
-- Test: `./test.csv`
-- Sample submission: `./sample_submission.csv` or `./input/sample_submission.csv`
-- Cache directory: `./working/cache/`
+The framework injects `DATA_DIR` and `METADATA_DIR` as environment variables.
+Always load data as follows:
+
+```python
+import os
+DATA_DIR = os.environ.get('DATA_DIR', '.')
+METADATA_DIR = os.environ.get('METADATA_DIR', './metadata')
+```
+
+- Full training set: `os.path.join(DATA_DIR, 'train.csv')`
+- Test set:         `os.path.join(DATA_DIR, 'test.csv')`
+- Train split (80%): `os.path.join(METADATA_DIR, 'train.csv')`
+- Val split (20%):   `os.path.join(METADATA_DIR, 'val.csv')`
+- Sample submission: `os.path.join(DATA_DIR, 'sample_submission.csv')`
+- Cache directory:   `./working/cache/`
 
 ---
 
