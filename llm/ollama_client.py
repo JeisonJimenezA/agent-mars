@@ -217,7 +217,7 @@ class OllamaClient:
             response = requests.post(
                 f"{self.base_url}/api/pull",
                 json={"name": model_name, "stream": False},
-                timeout=3600  # 1 hour timeout for large models
+                timeout=5400  # 1.5 hours timeout for large models
             )
 
             if response.status_code == 200:

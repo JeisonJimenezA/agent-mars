@@ -86,7 +86,7 @@ MODULE_TO_PACKAGE = {
 @dataclass
 class ExecutionConfig:
     """Configuration for code execution"""
-    timeout: int = 3600  # 1 hour default
+    timeout: int = 10800  # 3 hours default
     max_memory_mb: int = 30000  # 30GB
     capture_output: bool = True
     working_dir: Optional[Path] = None
@@ -136,7 +136,8 @@ class Executor:
         self,
         filepath: Path,
         timeout: Optional[int] = None,
-        working_dir: Optional[Path] = None
+        working_dir: Optional[Path] = None,
+        env_vars: Optional[Dict[str, str]] = None,
     ) -> ExecutionResult:
         """
         Execute a Python file with resource monitoring.
@@ -162,7 +163,9 @@ class Executor:
         env = os.environ.copy()
         if self.config.env_vars:
             env.update(self.config.env_vars)
-        
+        if env_vars:
+            env.update(env_vars)
+
         # Add Python path
         env['PYTHONPATH'] = str(working_dir)
         
@@ -435,7 +438,8 @@ class Executor:
         filepath: Path,
         timeout: Optional[int] = None,
         working_dir: Optional[Path] = None,
-        max_install_attempts: int = 3
+        max_install_attempts: int = 3,
+        env_vars: Optional[Dict[str, str]] = None,
     ) -> ExecutionResult:
         """
         Execute a Python file with automatic dependency installation.
@@ -455,7 +459,7 @@ class Executor:
 
         while install_attempts < max_install_attempts:
             # Execute the file
-            result = self.execute_python_file(filepath, timeout, working_dir)
+            result = self.execute_python_file(filepath, timeout, working_dir, env_vars)
 
             # If successful or no missing module error, return
             if result.success:

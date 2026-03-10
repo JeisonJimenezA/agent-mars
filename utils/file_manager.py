@@ -1,6 +1,7 @@
 # utils/file_manager.py
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 import tempfile
@@ -57,50 +58,86 @@ class FileManager:
         
         return created_files
     
+    def _create_directory_link(self, link_path: Path, target: Path):
+        """
+        Create a directory link (junction on Windows, symlink on Unix).
+        Falls back to copying if linking fails.
+
+        Args:
+            link_path: Path where the link will be created
+            target: Path to the target directory
+        """
+        target_abs = target.absolute()
+        try:
+            link_path.symlink_to(target_abs, target_is_directory=True)
+            return
+        except OSError:
+            pass
+
+        if sys.platform == "win32":
+            try:
+                result = subprocess.run(
+                    ["cmd", "/c", "mklink", "/J", str(link_path), str(target_abs)],
+                    capture_output=True,
+                    check=True,
+                )
+                return
+            except Exception:
+                pass
+
+        # Final fallback: physical copy
+        shutil.copytree(target_abs, link_path)
+
+    def _link_file(self, source: Path, target: Path):
+        """
+        Create a hardlink from source to target.
+        Falls back to copying if hardlink fails.
+
+        Args:
+            source: Existing file to link from
+            target: Path for the new link
+        """
+        try:
+            os.link(source, target)
+        except OSError:
+            shutil.copy2(source, target)
+
     def copy_metadata(self, solution_dir: Path, metadata_source: Path):
         """
-        Copy metadata directory to solution directory.
-        
+        Link metadata directory into solution directory (no data copy).
+        Uses a junction on Windows or a symlink on Unix so that data is
+        read directly from the original metadata path.
+
         Args:
             solution_dir: Target directory
             metadata_source: Source metadata directory
         """
         if not metadata_source.exists():
             return
-        
+
         target_metadata = solution_dir / "metadata"
-        if target_metadata.exists():
-            shutil.rmtree(target_metadata)
-        
-        shutil.copytree(metadata_source, target_metadata)
-    
+        if target_metadata.exists() or target_metadata.is_symlink():
+            if target_metadata.is_symlink():
+                target_metadata.unlink()
+            elif sys.platform == "win32":
+                # On Windows, junctions appear as dirs but rmtree fails on them.
+                # os.rmdir removes the junction without deleting the target contents.
+                try:
+                    os.rmdir(target_metadata)
+                except OSError:
+                    shutil.rmtree(target_metadata)
+            else:
+                shutil.rmtree(target_metadata)
+
+        self._create_directory_link(target_metadata, metadata_source)
+
     def copy_input_data(self, solution_dir: Path, input_source: Path):
         """
-        Copy input data files directly to solution directory root.
-
-        Args:
-            solution_dir: Target directory
-            input_source: Source input data directory
+        No-op: raw input data is no longer placed inside node directories.
+        Generated code reads directly from the original path via the DATA_DIR
+        environment variable injected by the executor.
         """
-        if not input_source.exists():
-            return
-
-        # Copy CSV files directly to solution root for easy access
-        # This matches the expected paths in generated code (train.csv, test.csv, etc.)
-        for file_path in input_source.iterdir():
-            if file_path.is_file():
-                target_file = solution_dir / file_path.name
-                if not target_file.exists():
-                    shutil.copy2(file_path, target_file)
-
-        # Also create input/ symlink for backward compatibility
-        target_input = solution_dir / "input"
-        if not target_input.exists():
-            try:
-                target_input.symlink_to(input_source.absolute(), target_is_directory=True)
-            except OSError:
-                # Fallback to copying if symlink fails (Windows)
-                shutil.copytree(input_source, target_input)
+        pass
     
     def create_working_subdirs(self, solution_dir: Path):
         """

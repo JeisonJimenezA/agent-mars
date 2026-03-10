@@ -12,6 +12,7 @@ from core.config import Config
 from core.challenge_loader import ChallengeLoader
 from mle.eda_agent import EDAAgent
 from orchestrator import MARSOrchestrator
+from utils.hardware_info import get_hardware_context
 
 def main():
     parser = argparse.ArgumentParser(description="MARS - Unified Challenge Runner")
@@ -28,10 +29,10 @@ def main():
         help="Path to challenge data directory"
     )
     parser.add_argument(
-        "--time-budget", 
-        type=int, 
-        default=3600,
-        help="Time budget in seconds (default: 3600 = 1 hour)"
+        "--time-budget",
+        type=int,
+        default=18000,
+        help="Time budget in seconds (default: 18000 = 5 hours)"
     )
     parser.add_argument(
         "--output-dir", 
@@ -54,6 +55,8 @@ def main():
     print(f"Data: {data_dir}")
     print(f"Output: {output_dir}")
     print(f"Budget: {args.time_budget}s ({args.time_budget/3600:.1f}h)")
+    print("="*70)
+    print(get_hardware_context())
     print("="*70 + "\n")
     
     # ========================================
@@ -104,12 +107,8 @@ def main():
         validation_ratio=0.2
     )
     
-    # Copy test data if exists
     if 'test' in data:
-        test_path = metadata_dir / "test.csv"
-        data['test'].to_csv(test_path, index=False)
-        splits['test'] = test_path
-        print(f"  ✓ Test: {len(data['test'])} samples")
+        print(f"  ✓ Test: {len(data['test'])} samples (from {data_dir})")
     
     # ========================================
     # STEP 3: Quick EDA
@@ -142,7 +141,7 @@ def main():
     print("="*70 + "\n")
     
     # Get metric direction
-    _, lower_is_better = loader.get_metric_info()
+    metric_name, lower_is_better = loader.get_metric_info()
 
     # Initialize orchestrator with ONLY problem description
     # NO model suggestions - agent figures everything out
@@ -154,6 +153,7 @@ def main():
         time_budget=args.time_budget,
         working_dir=output_dir,
         lower_is_better=lower_is_better,
+        metric_name=metric_name,
     )
     
     # Run search

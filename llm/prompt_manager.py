@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Dict, Optional, Any
 from core.config import Config
 import re
+from utils.hardware_info import get_hardware_context
 
 class PromptManager:
     """
@@ -156,8 +157,8 @@ class PromptManager:
             "file_description": "Module implementation",
             
             # Execution parameters
-            "exec_timeout": "1 hour",
-            "timeout": "3600",
+            "exec_timeout": "1 hour 30 minutes",
+            "timeout": "5400",
             
             # Code/Files
             "library_files": "No existing files.",
@@ -210,6 +211,9 @@ class PromptManager:
             "code_diff": "No code differences available.",
             "execution_output": "",
             "review_findings": "No review findings available.",
+
+            # Hardware context (detected once at runtime, cached)
+            "hardware_context": get_hardware_context(),
         }
     
     def list_prompts(self) -> list:

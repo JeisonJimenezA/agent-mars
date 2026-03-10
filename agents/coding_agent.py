@@ -364,11 +364,16 @@ Overall Idea: {idea}
 Existing Modules:
 {library}
 
-DATA FILE LOCATIONS:
-- Training data: ./train.csv (in the current working directory)
-- Test data: ./test.csv (in the current working directory)
-- Sample submission: ./sample_submission.csv
-- Cache directory: ./working/cache/
+DATA FILE LOCATIONS (use environment variables injected by the framework):
+import os
+DATA_DIR = os.environ.get('DATA_DIR', '.')
+METADATA_DIR = os.environ.get('METADATA_DIR', './metadata')
+- Full training set:  os.path.join(DATA_DIR, 'train.csv')
+- Test set:           os.path.join(DATA_DIR, 'test.csv')
+- Train split (80%):  os.path.join(METADATA_DIR, 'train.csv')
+- Val split (20%):    os.path.join(METADATA_DIR, 'val.csv')
+- Sample submission:  os.path.join(DATA_DIR, 'sample_submission.csv')
+- Cache directory:    ./working/cache/
 
 Requirements:
 - Python 3.9+ with type hints
@@ -397,11 +402,15 @@ Solution: {idea}
 Available Modules:
 {library}
 
-DATA FILE LOCATIONS:
-- Training data: ./train.csv (in the current working directory)
-- Test data: ./test.csv (in the current working directory)
-- Sample submission: ./sample_submission.csv
-- Metadata: ./metadata/
+DATA FILE LOCATIONS (use environment variables injected by the framework):
+import os
+DATA_DIR = os.environ.get('DATA_DIR', '.')
+METADATA_DIR = os.environ.get('METADATA_DIR', './metadata')
+- Full training set:  os.path.join(DATA_DIR, 'train.csv')
+- Test set:           os.path.join(DATA_DIR, 'test.csv')
+- Train split (80%):  os.path.join(METADATA_DIR, 'train.csv')
+- Val split (20%):    os.path.join(METADATA_DIR, 'val.csv')
+- Sample submission:  os.path.join(DATA_DIR, 'sample_submission.csv')
 
 Requirements:
 - Import and use modules

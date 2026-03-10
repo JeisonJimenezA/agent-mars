@@ -19,6 +19,7 @@ from agents.review_agent import ReviewAgent
 from agents.solution_improver import SolutionImprover
 from agents.validation_agent import ValidationAgent
 from utils.file_manager import FileManager
+from utils.tree_visualizer import TreeVisualizer
 from execution.executor import Executor, ExecutionConfig
 from execution.validator import SolutionValidator
 
@@ -34,9 +35,10 @@ class MARSOrchestrator:
         eda_report: str,
         metadata_dir: Path,
         data_dir: Optional[Path] = None,
-        time_budget: int = 3600,
+        time_budget: int = 18000,
         working_dir: Optional[Path] = None,
         lower_is_better: bool = False,
+        metric_name: str = "metric",
     ):
         self.problem_description = problem_description
         self.eda_report = eda_report
@@ -45,6 +47,7 @@ class MARSOrchestrator:
         self.time_budget = time_budget
         self.working_dir = working_dir or Config.WORKING_DIR
         self.lower_is_better = lower_is_better
+        self.metric_name = metric_name
 
         # Initialize components
         self.mcts = MCTSEngine(time_budget=time_budget, lower_is_better=lower_is_better)
@@ -72,7 +75,7 @@ class MARSOrchestrator:
 
         # Initialize utilities
         self.file_manager = FileManager(self.working_dir)
-        self.executor = Executor(ExecutionConfig(timeout=1800))
+        self.executor = Executor(ExecutionConfig(timeout=3600))
         self.validator = SolutionValidator()
         self.debug_logger = get_debug_logger()
 
@@ -178,12 +181,21 @@ class MARSOrchestrator:
                 self._review_execution(new_node)
 
             # ----------------------------------------------------------
-            # Step 6: Update MCTS tree (backpropagation)
+            # Step 6: Extract lessons (Algorithm 2, line 32: ExtractLesson
+            #   before Backpropagate — paper order: ExecuteAndReview →
+            #   ExtractLesson → Backpropagate)
+            # ----------------------------------------------------------
+            if new_node.status == NodeStatus.VALID:
+                self._extract_lessons(new_node)
+
+            # ----------------------------------------------------------
+            # Step 7: Update MCTS tree (backpropagation)
+            #   Algorithm 2, line 33: Backpropagate(v_new, R)
             # ----------------------------------------------------------
             self.mcts.update_after_execution(new_node, new_node.execution_result)
 
             # ----------------------------------------------------------
-            # Step 7: Track stagnation and valid solutions (Mejora 3)
+            # Step 8: Track stagnation and valid solutions (Mejora 3)
             # ----------------------------------------------------------
             if new_node.status == NodeStatus.VALID:
                 self.valid_solutions_count += 1
@@ -195,12 +207,6 @@ class MARSOrchestrator:
                     self.stagnation_count = 0
                 self.last_best_metric = current_best
 
-            # ----------------------------------------------------------
-            # Step 8: Extract lessons from valid solutions
-            # ----------------------------------------------------------
-            if new_node.status == NodeStatus.VALID:
-                self._extract_lessons(new_node)
-
             # Save progress
             self._save_progress()
 
@@ -209,6 +215,7 @@ class MARSOrchestrator:
         print("SEARCH COMPLETE")
         print("=" * 70)
         self._print_final_statistics()
+        self._generate_tree_visualization()
 
         return self.mcts.best_node
 
@@ -587,8 +594,6 @@ class MARSOrchestrator:
             self.file_manager.write_files(test_dir, test_files)
             if self.metadata_dir.exists():
                 self.file_manager.copy_metadata(test_dir, self.metadata_dir)
-            if self.data_dir and self.data_dir.exists():
-                self.file_manager.copy_input_data(test_dir, self.data_dir)
 
             # Use auto-install for module tests too
             test_result = self.executor.execute_with_auto_install(
@@ -596,6 +601,7 @@ class MARSOrchestrator:
                 working_dir=test_dir,
                 timeout=120,
                 max_install_attempts=2,
+                env_vars=self._data_env_vars(),
             )
 
             if test_result.success:
@@ -635,6 +641,13 @@ class MARSOrchestrator:
             return fixed_files[filename]
         return None
 
+    def _data_env_vars(self) -> Dict[str, str]:
+        """Return env vars that point generated code to the original data paths."""
+        return {
+            "DATA_DIR": str(self.data_dir.absolute()) if self.data_dir else ".",
+            "METADATA_DIR": str(self.metadata_dir.absolute()),
+        }
+
     # ==================================================================
     # Execution + Review
     # ==================================================================
@@ -651,13 +664,9 @@ class MARSOrchestrator:
         files = node.solution.get_all_files()
         self.file_manager.write_files(solution_dir, files)
 
-        # Copy metadata
+        # Link metadata (train/val splits) into solution dir
         if self.metadata_dir.exists():
             self.file_manager.copy_metadata(solution_dir, self.metadata_dir)
-
-        # Copy input data
-        if self.data_dir and self.data_dir.exists():
-            self.file_manager.copy_input_data(solution_dir, self.data_dir)
 
         # Create working subdirectories
         self.file_manager.create_working_subdirs(solution_dir)
@@ -667,7 +676,8 @@ class MARSOrchestrator:
         result = self.executor.execute_with_auto_install(
             main_path,
             working_dir=solution_dir,
-            max_install_attempts=3
+            max_install_attempts=3,
+            env_vars=self._data_env_vars(),
         )
 
         # Set execution result on node
@@ -853,6 +863,21 @@ class MARSOrchestrator:
             print(f"  Node ID: {self.mcts.best_node.id}")
             print(f"  Metric: {self.mcts.best_node.metric_value}")
             print(f"  Execution time: {self.mcts.best_node.execution_time:.1f}s")
+
+    def _generate_tree_visualization(self):
+        """Render and save the MCTS search tree as a PNG."""
+        try:
+            viz = TreeVisualizer()
+            output_path = self.working_dir / "mcts_tree.png"
+            viz.generate(
+                root=self.mcts.root,
+                best_node=self.mcts.best_node,
+                output_path=output_path,
+                metric_name=self.metric_name,
+                lower_is_better=self.lower_is_better,
+            )
+        except Exception as e:
+            self.log(f"Tree visualization failed (non-blocking): {e}")
 
     def log(self, message: str):
         """Log message with orchestrator prefix."""

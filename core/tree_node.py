@@ -101,7 +101,7 @@ class TreeNode:
         # Metrics
         self.metric_value: Optional[float] = None
         self.execution_time: float = 0.0
-        self.time_limit: float = 3600.0  # Default 1 hour
+        self.time_limit: float = 5400.0  # Default 1.5 hours
         
         # Timestamps
         self.created_at: float = time.time()
@@ -211,9 +211,11 @@ class TreeNode:
         )
     
     def mark_fully_expanded(self):
-        """Mark node as fully expanded"""
+        """Mark node as fully expanded (retains VALID/BUGGY status)"""
         self.is_fully_expanded = True
-        self.status = NodeStatus.FULLY_EXPANDED
+        # Do NOT change status — the node's VALID/BUGGY status must be
+        # preserved for lesson extraction and reward computation.
+        # Expansion eligibility is controlled solely by is_fully_expanded.
     
     def get_path_from_root(self) -> List['TreeNode']:
         """Get path from root to this node"""

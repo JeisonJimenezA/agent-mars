@@ -34,12 +34,13 @@ class Config:
     # ============================================================================
     # MCTS Hyperparameters (from paper)
     # ============================================================================
-    KM: int = int(os.getenv("MCTS_KM", "30"))  # Max lessons in memory
-    ND: int = int(os.getenv("MCTS_ND", "10"))  # Max debugging attempts
-    NI: int = int(os.getenv("MCTS_NI", "2"))   # Branching factor
+    KM: int = int(os.getenv("MCTS_KM", "30"))       # Max lessons in memory
+    ND: int = int(os.getenv("MCTS_ND", "10"))       # Max debugging attempts
+    NI: int = int(os.getenv("MCTS_NI", "2"))        # Branching factor (improvements per valid node)
     W: float = float(os.getenv("MCTS_W", "-0.07"))  # Latency penalty weight
     C_UCT: float = float(os.getenv("MCTS_CUCT", "1.414"))  # UCT constant
-    NS: int = 5  # Valid nodes without improvement before reactivating root
+    NS: int = int(os.getenv("MCTS_NS", "5"))        # Valid nodes without improvement before reactivating root
+    MAX_DEPTH: int = int(os.getenv("MCTS_MAX_DEPTH", "4"))  # Max tree depth (balances breadth vs depth)
     LOWER_IS_BETTER: bool = False  # Metric direction (set per-task)
 
     # ============================================================================

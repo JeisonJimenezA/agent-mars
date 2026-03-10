@@ -22,6 +22,7 @@ class MCTSEngine:
         c_uct: float = None,
         stagnation_threshold: int = None,
         lower_is_better: bool = None,
+        max_depth: int = None,
     ):
         # Hyperparameters (from Config or override)
         self.time_budget = time_budget
@@ -31,6 +32,7 @@ class MCTSEngine:
         self.c_uct = c_uct or Config.C_UCT
         self.stagnation_threshold = stagnation_threshold or Config.NS
         self.lower_is_better = lower_is_better if lower_is_better is not None else Config.LOWER_IS_BETTER
+        self.max_depth = max_depth if max_depth is not None else Config.MAX_DEPTH
         
         # Tree structure
         self.root: TreeNode = TreeNode(depth=0)
@@ -166,21 +168,31 @@ class MCTSEngine:
         EXPANSION phase: Create new child node.
         Only DRAFT (from root) and IMPROVE (from valid nodes).
         DEBUG is handled inline by the orchestrator.
+
+        Depth limit (MAX_DEPTH) balances tree breadth vs depth:
+        valid nodes beyond max_depth are marked fully expanded,
+        forcing the search back to root for new DRAFTs.
         """
         if node == self.root:
             action_type = ActionType.DRAFT
         elif node.status == NodeStatus.VALID:
+            # Depth limit: prevent infinite deepening of improvements
+            if node.depth >= self.max_depth:
+                print(f"  [MCTS] Node {node.id} at max depth ({self.max_depth}), forcing breadth exploration")
+                node.mark_fully_expanded()
+                return None
             action_type = ActionType.IMPROVE
         else:
             return None
 
-        # Create child node with time_limit from budget
+        # Create child node with time_limit = per-solution execution cap
+        # (used as L(v) in the reward function Eq 4: R = G · [t/L]^w)
         child = TreeNode(
             parent=node,
             action_type=action_type,
             depth=node.depth + 1,
         )
-        child.time_limit = float(self.time_budget)
+        child.time_limit = float(Config.MAX_EXECUTION_TIME)
 
         node.add_child(child)
 
