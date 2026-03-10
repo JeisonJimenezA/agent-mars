@@ -1,0 +1,69 @@
+Google Question Answering Labels Challenge
+
+OBJECTIVE:
+Predict subjective quality scores for question-answer pairs across 30 target labels.
+
+DATASET:
+Files:
+- train.csv: Training data with labels
+- test.csv: Test data for predictions
+- sample_submission.csv: Example submission format
+
+Training Data Structure:
+- Columns: qa_id, question_title, question_body, question_user_name, question_user_page,
+           answer, answer_user_name, answer_user_page, url, category, host,
+           + 30 target label columns
+- Features: Text and metadata features for each question-answer pair
+  * question_title: Title of the question
+  * question_body: Full body text of the question
+  * answer: The answer text corresponding to the question
+  * category / host: Source website category and domain
+  * Data gathered from nearly 70 different StackExchange-like websites
+- Target: 30 continuous labels in the range [0, 1]
+  * Labels prefixed with question_ relate to question_title and/or question_body
+  * Labels prefixed with answer_ relate to the answer feature
+  * Values are aggregated from multiple human raters (not binary)
+
+Target Labels (30 total):
+  question_asker_intent_understanding, question_body_critical_thinking,
+  question_conversational, question_expect_short_answer, question_fact_seeking,
+  question_has_commonly_accepted_answer, question_interestingness_others,
+  question_interestingness_self, question_multi_intent, question_not_really_a_question,
+  question_opinion_seeking, question_type_choice, question_type_compare,
+  question_type_consequence, question_type_definition, question_type_entity,
+  question_type_instructions, question_type_procedure, question_type_reason_explanation,
+  question_type_spelling, question_well_written,
+  answer_helpful, answer_level_of_information, answer_plausible, answer_relevance,
+  answer_satisfaction, answer_type_instructions, answer_type_procedure,
+  answer_type_reason_explanation, answer_well_written
+
+Test Data Structure:
+- Contains the same feature columns as training data (no target labels)
+- No duplicate questions in test set
+- Re-run test set: no larger than 10,000 rows, less than 8 MB uncompressed
+
+EVALUATION:
+Metric: Mean column-wise Spearman's rank correlation coefficient
+Direction: Higher is better (maximize)
+
+Formula: Score = (1/M) * Σ(j=1 to M) ρ_j
+Where:
+- M = number of target columns (30)
+- ρ_j = Spearman's rank correlation for target column j
+- Spearman's ρ measures monotonic relationship between predictions and true values
+
+Notes:
+- Predictions must be in the range [0, 1] for each target label
+- Each target is scored independently and then averaged
+- Labels are continuous (aggregated from multiple raters), not binary
+
+SUBMISSION FORMAT:
+File: submission.csv
+Columns: qa_id, question_asker_intent_understanding, ..., answer_well_written
+- Each row must contain predictions for all 30 target labels
+- All predicted values must be in range [0, 1]
+- Example line: 6,0.0,...,0.5
+
+VALIDATION:
+Use cross-validation preserving the distribution of source websites (host/category).
+Print validation metric as: "Final Validation Metric: <value>"

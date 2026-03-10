@@ -1,0 +1,100 @@
+chaii - Hindi and Tamil Question Answering Challenge
+
+OBJECTIVE:
+Given a Wikipedia article context and a question in Hindi or Tamil, extract the
+exact answer span from the context as a text string. This is an extractive
+question answering task for two underrepresented Indian languages, where the
+answer must be a verbatim substring of the provided context.
+
+The broader goal is to advance multilingual NLU for Indian languages, which are
+severely underrepresented on the web despite being spoken by nearly 1.4 billion
+people, and to close the performance gap between English and Indian language NLP.
+
+CONTEXT AND MOTIVATION:
+- Hindi and Tamil NLU models significantly underperform compared to English models
+- The chaii-1 dataset was collected WITHOUT translation — questions and answers
+  were written directly by native-speaking expert annotators (not translated from English)
+- This makes it a realistic information-seeking benchmark, not an artificial translation task
+- Dataset follows the two-step TyDiQA annotation protocol:
+  (1) Question elicitation: annotators write questions from Wikipedia snippets
+  (2) Answer labeling: annotators select answer spans from full Wikipedia documents
+- Non-answerable questions were excluded from the dataset
+- Train answers: produced by 1 annotator
+- Test answers: produced by 3 annotators with majority voting + quality review pass
+- Hindi train quality: ~93.8% accuracy | Hindi test quality: ~97.8% accuracy
+- Tamil train and test: no issues found in quality sampling checks
+- Some noise in training data is expected and intentional to reflect real-world conditions
+
+DATASET:
+Files:
+- train.csv          : Training examples with context, questions, and answers
+- test.csv           : Test examples with context and questions (no answers)
+- sample_submission.csv : Correct submission format
+
+All files must be encoded as UTF-8 (critical for Hindi/Tamil script handling)
+
+train.csv columns:
+- id           : Unique identifier for each question-answer pair
+- context      : Wikipedia passage in Hindi or Tamil from which the answer is drawn
+- question     : The question in Hindi or Tamil
+- answer_text  : Ground truth answer string (verbatim substring of context)
+- answer_start : Starting character index of answer_text in context
+                 (computed automatically via substring match — may contain
+                 inaccuracies, safe to ignore or recompute during training)
+- language     : "hindi" or "tamil"
+
+test.csv columns:
+- id       : Unique identifier
+- context  : Wikipedia passage in Hindi or Tamil
+- question : The question in Hindi or Tamil
+- language : "hindi" or "tamil"
+
+IMPORTANT DATA NOTES:
+- The task is EXTRACTIVE: the answer must come verbatim from the context,
+  not generated or paraphrased — this means span prediction is the core subtask
+- answer_start was computed automatically and may be slightly inaccurate
+  The competition only requires predicting answer_text (the string), NOT the offset
+- Participants are encouraged to ignore or recompute answer_start independently
+- Both Hindi (Devanagari script) and Tamil (Tamil script) are included —
+  tokenization and preprocessing must handle both scripts correctly
+- UTF-8 encoding is mandatory for correct script representation
+- A small public sample is provided for code validation;
+  a hidden test set is used for final scoring
+- Hindi and Tamil have very different morphological structures:
+  * Hindi is Indo-Aryan, uses Devanagari script, fusional morphology
+  * Tamil is Dravidian, uses Tamil script, agglutinative morphology
+  Models must generalize across both language families
+
+EVALUATION:
+Metric: Mean word-level Jaccard similarity score
+Direction: Higher is better (maximize, range: 0.0 to 1.0)
+
+Jaccard similarity between two strings is computed as:
+
+def jaccard(str1, str2):
+    a = set(str1.lower().split())
+    b = set(str2.lower().split())
+    c = a.intersection(b)
+    return float(len(c)) / (len(a) + len(b) - len(c))
+
+Overall score formula:
+  score = (1/n) * Σ jaccard(gt_i, dt_i)  for i = 1 to n
+
+Where:
+- n   = number of documents (test examples)
+- gt_i = ground truth answer string for example i
+- dt_i = predicted answer string for example i
+
+CRITICAL NOTES ON THE METRIC:
+- Jaccard operates at the WORD level (split by whitespace), not character level
+- Comparison is case-insensitive (both strings lowercased before splitting)
+- Word ORDER does not matter — only word SET overlap counts
+  (predicting words in wrong order doesn't penalize if words are correct)
+- Partial credit is awarded: predicting some correct words is better than none
+- Predicting an empty string scores 0.0 for that example
+- Predicting extra words not in ground truth reduces the score (union grows)
+- The metric is symmetric and bounded [0, 1]
+- Unlike exact match (EM), Jaccard rewards near-correct predictions
+- This also means predicting slightly longer spans than necessary is less
+  damaging than in exact match evaluations — err on the side of slightly
+  longer spans rather than shorter ones

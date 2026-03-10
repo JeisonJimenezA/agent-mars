@@ -1,0 +1,47 @@
+Toxic Comment Classification Challenge
+
+OBJECTIVE:
+Build a multi-headed model capable of detecting different types of toxicity
+(threats, obscenity, insults, identity-based hate) better than Perspective's
+current models, using a dataset of comments from Wikipedia's talk page edits.
+
+BACKGROUND:
+The Conversation AI team, a research initiative founded by Jigsaw and Google
+(both part of Alphabet), is working on tools to improve online conversation.
+Current models make errors and don't allow users to select which types of
+toxicity they're interested in finding. This competition aims to address that.
+
+Note: The dataset contains text that may be considered profane, vulgar, or
+offensive.
+
+DATASET:
+Files:
+- train.csv: Training data with labels
+- test.csv: Test data for predictions
+- sample_submission.csv: Example submission format
+
+Labels (6 toxicity types):
+- toxic
+- severe_toxic
+- obscene
+- threat
+- insult
+- identity_hate
+
+EVALUATION:
+Metric: Mean column-wise ROC AUC
+Direction: Higher is better (maximize)
+
+Formula: Average of the individual AUCs of each predicted column
+- Updated Jan 30, 2018 (changed from original metric)
+
+Notes:
+- Predicted values should be probabilities between 0.0 and 1.0
+- Each toxicity type is evaluated independently
+- Final score is the mean AUC across all 6 columns
+
+SUBMISSION FORMAT:
+File: submission.csv
+Columns: id, toxic, severe_toxic, obscene, threat, insult, identity_hate
+- Each row must contain probabilities for all 6 toxicity types
+- Example line: 00001cee341fdb12,0.5,0.5,0.5,0.5,0.5,0.5
