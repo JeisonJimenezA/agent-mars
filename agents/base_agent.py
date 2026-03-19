@@ -35,7 +35,8 @@ class BaseAgent(ABC):
         user_message: str,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        stream: bool = False,
     ) -> Dict[str, Any]:
         """
         Call LLM with user message.
@@ -45,6 +46,7 @@ class BaseAgent(ABC):
             temperature: Sampling temperature
             max_tokens: Max tokens to generate
             system_prompt: Override default system prompt
+            stream: If True, print tokens to stdout as they arrive (Ollama only)
 
         Returns:
             Response dict with 'content', 'tokens', etc.
@@ -59,7 +61,8 @@ class BaseAgent(ABC):
         response = self.client.chat_completion(
             messages=messages,
             temperature=temperature,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
+            stream=stream,
         )
 
         # Update statistics

@@ -35,6 +35,8 @@ validation set.
   * Cross-validation with preprocessing applied before fold splitting
   * Validation labels used during training in any way
 
+Metric to evaluate: **{metric_name}**
+
 Code:
 ```
 {code}

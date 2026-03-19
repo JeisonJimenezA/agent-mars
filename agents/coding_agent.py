@@ -1,10 +1,15 @@
 # agents/coding_agent.py - ESTRUCTURA COMPLETA
 
+import os
 from typing import Dict, Optional, List
 from agents.base_agent import BaseAgent
 from memory.lesson_pool import LessonPool
 from memory.lesson_types import LessonType
 from core.config import Config
+
+# Stream code generation to stdout by default when using Ollama.
+# Set MARS_STREAM=false in .env to disable.
+_STREAM = os.getenv("MARS_STREAM", "true").lower() != "false"
 
 class CodingAgent(BaseAgent):
     """Agent responsible for implementing code modules."""
@@ -32,7 +37,9 @@ Your code must be syntactically valid Python that can be executed directly."""
         module_description: str,
         existing_modules: Dict[str, str],
         lesson_pool: Optional[LessonPool] = None,
-        eda_report: str = ""
+        eda_report: str = "",
+        metric_name: str = "",
+        data_schema: str = "",
     ) -> Optional[str]:
         """Implement a single module."""
 
@@ -40,6 +47,13 @@ Your code must be syntactically valid Python that can be executed directly."""
 
         # Format existing modules
         library_files = self._format_library_files(existing_modules)
+
+        # Extract lessons
+        lessons_text = ""
+        if lesson_pool:
+            lessons_text = lesson_pool.format_for_prompt(
+                lesson_type=LessonType.SOLUTION, k=10
+            )
 
         # Get prompt
         try:
@@ -51,6 +65,9 @@ Your code must be syntactically valid Python that can be executed directly."""
                 file_name=module_name,
                 file_description=module_description,
                 library_files=library_files,
+                lessons=lessons_text,
+                metric_name=metric_name or "unknown",
+                data_schema=data_schema,
             )
         except ValueError as e:
             self.log(f"Using fallback prompt: {e}")
@@ -58,50 +75,61 @@ Your code must be syntactically valid Python that can be executed directly."""
                 module_name, module_description, idea, library_files, problem_description
             )
         
-        # Call LLM - usar max tokens del modelo (8192)
         response = self.call_llm(
             user_message=prompt,
             temperature=0.2,
-            max_tokens=Config.MAX_TOKENS
+            max_tokens=Config.MAX_TOKENS,
+            stream=_STREAM,
         )
-        
-        # Extract code
-        code = self._extract_code_from_response(response["content"])
 
-        if code:
-            is_valid, error = self.parser.validate_syntax(code)
+        raw = response["content"]
+        code, truncated = self._extract_with_truncation_check(raw)
 
-            # Debug logging
-            self.debug_logger.log_code_generation(
-                module_name=module_name,
-                generated_code=code,
-                is_valid=is_valid,
-                syntax_error=error,
-                agent_name=self.name
-            )
+        # Continuation loop if truncated
+        MAX_CONTINUATIONS = 3
+        for cont in range(MAX_CONTINUATIONS):
+            if not truncated:
+                break
+            self.log(f"Module {module_name} truncated — continuation {cont + 1}/{MAX_CONTINUATIONS}")
+            extra, truncated = self._continue_code(code)
+            if extra:
+                code = code.rstrip() + "\n" + extra.lstrip()
 
+        if not code:
+            self.log("Failed to generate valid code")
+            return None
+
+        is_valid, error = self.parser.validate_syntax(code)
+
+        # Debug logging
+        self.debug_logger.log_code_generation(
+            module_name=module_name,
+            generated_code=code,
+            is_valid=is_valid,
+            syntax_error=error,
+            agent_name=self.name
+        )
+
+        if is_valid:
+            self.log(f"Generated {len(code)} chars of valid code")
+            return code
+
+        self.log(f"Syntax error: {error}")
+
+        code_fixed = self._try_fix_syntax(code)
+        if code_fixed:
+            is_valid, _ = self.parser.validate_syntax(code_fixed)
             if is_valid:
-                self.log(f"Generated {len(code)} chars of valid code")
-                return code
-            else:
-                self.log(f"Syntax error: {error}")
+                self.log(f"Fixed syntax error, {len(code_fixed)} chars")
+                return code_fixed
 
-                # Try basic fix first
-                code_fixed = self._try_fix_syntax(code)
-                if code_fixed:
-                    is_valid, _ = self.parser.validate_syntax(code_fixed)
-                    if is_valid:
-                        self.log(f"Fixed syntax error, {len(code_fixed)} chars")
-                        return code_fixed
-
-                # Try asking LLM to fix the syntax error
-                self.log("Attempting LLM-based syntax fix...")
-                code_fixed = self._ask_llm_to_fix_syntax(code, error, module_name)
-                if code_fixed:
-                    is_valid, _ = self.parser.validate_syntax(code_fixed)
-                    if is_valid:
-                        self.log(f"LLM fixed syntax error, {len(code_fixed)} chars")
-                        return code_fixed
+        self.log("Attempting LLM-based syntax fix...")
+        code_fixed = self._ask_llm_to_fix_syntax(code, error, module_name)
+        if code_fixed:
+            is_valid, _ = self.parser.validate_syntax(code_fixed)
+            if is_valid:
+                self.log(f"LLM fixed syntax error, {len(code_fixed)} chars")
+                return code_fixed
 
         self.log("Failed to generate valid code")
         return None
@@ -144,13 +172,21 @@ REQUIREMENTS:
         idea: str,
         modules: Dict[str, str],
         lesson_pool: Optional[LessonPool] = None,
-        eda_report: str = ""
+        eda_report: str = "",
+        metric_name: str = "",
+        data_schema: str = "",
     ) -> Optional[str]:
         """Implement main orchestration script."""
 
         self.log("Implementing main script...")
 
         library_files = self._format_library_files(modules)
+
+        lessons_text = ""
+        if lesson_pool:
+            lessons_text = lesson_pool.format_for_prompt(
+                lesson_type=LessonType.SOLUTION, k=10
+            )
 
         try:
             prompt = self.prompt_manager.get_prompt(
@@ -160,6 +196,9 @@ REQUIREMENTS:
                 idea=idea,
                 library_files=library_files,
                 file_description="Main orchestration script that runs the full pipeline",
+                lessons=lessons_text,
+                metric_name=metric_name or "unknown",
+                data_schema=data_schema,
             )
         except ValueError:
             prompt = self._create_main_fallback_prompt(
@@ -169,10 +208,19 @@ REQUIREMENTS:
         response = self.call_llm(
             user_message=prompt,
             temperature=0.2,
-            max_tokens=Config.MAX_TOKENS
+            max_tokens=Config.MAX_TOKENS,
+            stream=_STREAM,
         )
 
-        code = self._extract_code_from_response(response["content"])
+        code, truncated = self._extract_with_truncation_check(response["content"])
+
+        for cont in range(3):
+            if not truncated:
+                break
+            self.log(f"main.py truncated — continuation {cont + 1}/3")
+            extra, truncated = self._continue_code(code)
+            if extra:
+                code = code.rstrip() + "\n" + extra.lstrip()
 
         if code:
             is_valid, error = self.parser.validate_syntax(code)
@@ -189,6 +237,8 @@ REQUIREMENTS:
         module_name: str,
         module_code: str,
         existing_modules: Dict[str, str],
+        data_schema: str = "",
+        eda_report: str = "",
     ) -> Optional[str]:
         """
         Generate a lightweight unit-test script for a module.
@@ -207,6 +257,8 @@ REQUIREMENTS:
                 problem_description=problem_description,
                 idea=idea,
                 library_files=library_files,
+                data_schema=data_schema,
+                eda_report=eda_report,
             )
         except ValueError:
             prompt = self._create_module_test_fallback(
@@ -251,7 +303,7 @@ Other available modules:
 Provide the test code in a ```python block.
 """
     
-    def _format_library_files(self, modules: Dict[str, str], max_total_chars: int = 30000) -> str:
+    def _format_library_files(self, modules: Dict[str, str], max_total_chars: int = 80000) -> str:
         """
         Format modules for prompt with smart truncation.
 
@@ -293,52 +345,77 @@ Provide the test code in a ```python block.
         """
         Extract function and class signatures from code.
 
-        Returns imports + class/function headers with docstrings,
-        but not implementation details.
+        Returns imports + FULL function signatures (including multi-line
+        parameter lists and return type annotations) + docstrings.
+        This gives dependent modules enough context to call functions correctly.
         """
         lines = code.split('\n')
         result_lines = []
-        in_docstring = False
-        docstring_char = None
+        i = 0
 
-        for i, line in enumerate(lines):
+        while i < len(lines):
+            line = lines[i]
             stripped = line.strip()
 
             # Always include imports
             if stripped.startswith(('import ', 'from ')):
                 result_lines.append(line)
-                continue
-
-            # Include class and function definitions
-            if stripped.startswith(('class ', 'def ')):
-                result_lines.append(line)
-                # Check for docstring on next line
-                if i + 1 < len(lines):
-                    next_line = lines[i + 1].strip()
-                    if next_line.startswith('"""') or next_line.startswith("'''"):
-                        result_lines.append(lines[i + 1])
-                        # If docstring is on one line
-                        if next_line.count('"""') == 2 or next_line.count("'''") == 2:
-                            pass
-                        else:
-                            # Multi-line docstring - include until close
-                            docstring_char = '"""' if '"""' in next_line else "'''"
-                            for j in range(i + 2, min(i + 10, len(lines))):
-                                result_lines.append(lines[j])
-                                if docstring_char in lines[j]:
-                                    break
-                result_lines.append("        ...")  # Placeholder for implementation
+                i += 1
                 continue
 
             # Include decorators
             if stripped.startswith('@'):
                 result_lines.append(line)
+                i += 1
                 continue
 
-            # Include type hints and constants at module level
-            if '=' in stripped and not stripped.startswith(' ') and not stripped.startswith('#'):
-                if ':' in stripped.split('=')[0]:  # Type-annotated
+            # Include class and function definitions — capture FULL signature
+            # (handles multi-line signatures like def foo(\n    x: int,\n    y: str\n) -> bool:)
+            if stripped.startswith(('class ', 'def ')):
+                sig_lines = [line]
+                j = i + 1
+                # Continue collecting signature lines until we find the `:` that ends it
+                # A signature ends when there's a `:` at the end of the stripped line
+                # that is NOT inside parentheses
+                paren_depth = stripped.count('(') - stripped.count(')')
+                while paren_depth > 0 and j < len(lines):
+                    sig_lines.append(lines[j])
+                    paren_depth += lines[j].count('(') - lines[j].count(')')
+                    j += 1
+
+                result_lines.extend(sig_lines)
+
+                # Capture docstring (up to 15 lines)
+                if j < len(lines):
+                    next_stripped = lines[j].strip()
+                    if next_stripped.startswith('"""') or next_stripped.startswith("'''"):
+                        quote = '"""' if '"""' in next_stripped else "'''"
+                        result_lines.append(lines[j])
+                        # Single-line docstring
+                        if next_stripped.count(quote) >= 2:
+                            j += 1
+                        else:
+                            # Multi-line: include until closing quotes (max 15 lines)
+                            j += 1
+                            lines_captured = 0
+                            while j < len(lines) and lines_captured < 15:
+                                result_lines.append(lines[j])
+                                if quote in lines[j]:
+                                    j += 1
+                                    break
+                                j += 1
+                                lines_captured += 1
+
+                result_lines.append(lines[i][:len(lines[i]) - len(lines[i].lstrip())] + "    ...")
+                i = j
+                continue
+
+            # Include module-level type-annotated constants
+            if '=' in stripped and not stripped.startswith((' ', '\t', '#')):
+                if ':' in stripped.split('=')[0]:
                     result_lines.append(line)
+
+            i += 1
 
         result = '\n'.join(result_lines)
 
@@ -574,6 +651,60 @@ Provide complete code in ```python block.
 
         # Return as-is if no repair worked (let caller handle)
         return repaired
+
+    def _extract_with_truncation_check(self, raw: str):
+        """
+        Extract code from response and detect whether the model was truncated.
+        Returns (code, is_truncated).
+        """
+        import re as _re
+        if not raw:
+            return None, False
+
+        # Clean closed block → not truncated
+        closed = _re.search(r'```python\s*\n(.*?)```', raw, _re.DOTALL | _re.IGNORECASE)
+        if closed:
+            return closed.group(1).strip(), False
+
+        # Unclosed block → truncated
+        unclosed = _re.search(r'```python\s*\n(.+)$', raw, _re.DOTALL | _re.IGNORECASE)
+        if unclosed:
+            code = unclosed.group(1).strip()
+            if len(code) > 50:
+                return code, True
+
+        # Fallback extractor
+        code = self._extract_code_from_response(raw)
+        if code:
+            return code, not raw.rstrip().endswith("```")
+
+        return None, False
+
+    def _continue_code(self, existing_code: str):
+        """
+        Send a continuation request for truncated code.
+        Passes the FULL existing code so the model has complete context.
+        Returns (extra_code, still_truncated).
+        """
+        prompt = f"""The Python script below was cut off mid-generation due to output length limits.
+Continue writing from EXACTLY where it stopped. Do NOT repeat any code already shown.
+Write only what comes next, ending with ``` when the script is fully complete.
+
+FULL CODE SO FAR:
+```python
+{existing_code}
+```
+
+Continue the script from the next line:
+```python
+"""
+        response = self.call_llm(
+            user_message=prompt,
+            temperature=0.1,
+            max_tokens=Config.MAX_TOKENS,
+            stream=_STREAM,
+        )
+        return self._extract_with_truncation_check(response["content"])
 
     def _looks_like_python(self, code: str) -> bool:
         """Check if text looks like valid Python code."""

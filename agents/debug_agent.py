@@ -37,25 +37,35 @@ You excel at diagnosing errors and proposing targeted fixes."""
         problem_description: str,
         files: Dict[str, str],
         execution_error: str,
-        lesson_pool: Optional[LessonPool] = None
+        lesson_pool: Optional[LessonPool] = None,
+        previous_attempts: str = "",
+        eda_report: str = "",
+        data_schema: str = "",
+        metric_name: str = "",
     ) -> Optional[str]:
         """
         Analyze execution error and provide diagnosis.
-        
+
         Args:
             problem_description: Task description
             files: Solution files {name: code}
             execution_error: Error traceback
             lesson_pool: Pool of debug lessons
-            
+            eda_report: EDA summary for data-related errors
+            data_schema: Column names and types
+            metric_name: Metric being optimized
+
         Returns:
             Error analysis text
         """
         self.log("Analyzing execution error...")
-        
+
+        # Enrich the error with code snippets from each traceback frame
+        enriched_error = self._enrich_error_with_context(execution_error, files)
+
         # Format files
         files_text = self._format_files(files)
-        
+
         # Get debug lessons
         debug_lessons = ""
         if lesson_pool:
@@ -63,15 +73,25 @@ You excel at diagnosing errors and proposing targeted fixes."""
                 lesson_type=LessonType.DEBUG,
                 k=10
             )
-        
+
         # Get prompt
         prompt = self.prompt_manager.get_prompt(
             "bug_analysis",
             problem_description=problem_description,
             files=files_text,
-            exec_result=execution_error,
-            lessons=debug_lessons if debug_lessons else "No debug lessons yet."
+            exec_result=enriched_error,
+            lessons=debug_lessons if debug_lessons else "No debug lessons yet.",
+            eda_report=eda_report,
+            data_schema=data_schema,
+            metric_name=metric_name or "unknown",
         )
+
+        # Prepend previous failed attempts so the model avoids repeating them
+        if previous_attempts:
+            prompt = (
+                f"## PREVIOUS FAILED FIX ATTEMPTS (do not repeat these approaches)\n\n"
+                f"{previous_attempts}\n\n---\n\n{prompt}"
+            )
         
         # Call LLM - usar max tokens del modelo (8192)
         response = self.call_llm(
@@ -92,7 +112,11 @@ You excel at diagnosing errors and proposing targeted fixes."""
         files: Dict[str, str],
         execution_error: str,
         error_analysis: str,
-        lesson_pool: Optional[LessonPool] = None
+        lesson_pool: Optional[LessonPool] = None,
+        previous_attempts: str = "",
+        eda_report: str = "",
+        data_schema: str = "",
+        metric_name: str = "",
     ) -> Optional[Dict[str, str]]:
         """
         Generate fix for the error using DIFF-BASED EDITING.
@@ -131,7 +155,11 @@ You excel at diagnosing errors and proposing targeted fixes."""
             files_text,
             execution_error,
             error_analysis,
-            debug_lessons
+            debug_lessons,
+            previous_attempts,
+            eda_report=eda_report,
+            data_schema=data_schema,
+            metric_name=metric_name,
         )
 
         self.log(f"  Prompt size: {len(prompt)} chars")
@@ -205,7 +233,11 @@ You excel at diagnosing errors and proposing targeted fixes."""
         files_text: str,
         execution_error: str,
         error_analysis: str,
-        debug_lessons: str
+        debug_lessons: str,
+        previous_attempts: str = "",
+        eda_report: str = "",
+        data_schema: str = "",
+        metric_name: str = "",
     ) -> str:
         """
         Create prompt that instructs LLM to use diff-based fixes.
@@ -294,12 +326,12 @@ class ModelConfig:
 ## ERROR TO FIX
 
 ```
-{execution_error[:3000]}
+{execution_error}
 ```
 
 ## ERROR ANALYSIS
 
-{error_analysis[:1500]}
+{error_analysis}
 
 ## RELEVANT CODE (files related to error)
 
@@ -307,18 +339,135 @@ class ModelConfig:
 
 ## PROBLEM CONTEXT
 
-{problem_description[:1000]}
+{problem_description}
+
+## METRIC TO OPTIMIZE
+
+{metric_name if metric_name else "unknown"}
+
+## DATA SCHEMA
+
+{data_schema if data_schema else "No schema available."}
+
+## DATA FILE LOCATIONS (CRITICAL — never confuse these)
+
+The script runs with CWD = solution directory. Two env vars are always set:
+
+```python
+import os
+DATA_DIR      = os.environ.get('DATA_DIR', '.')       # original competition data
+METADATA_DIR  = os.environ.get('METADATA_DIR', './metadata')  # pre-split subsets
+```
+
+File purposes:
+- `os.path.join(DATA_DIR, 'train.csv')`       ← FULL original training set (has target column)
+- `os.path.join(DATA_DIR, 'test.csv')`        ← TEST SET — generate predictions for EVERY row here
+- `os.path.join(DATA_DIR, 'sample_submission.csv')` ← FORMAT TEMPLATE ONLY — column names & row order
+- `os.path.join(METADATA_DIR, 'train.csv')`   ← 80% training split (for model fitting)
+- `os.path.join(METADATA_DIR, 'val.csv')`     ← 20% hold-out validation split (for metric evaluation)
+- `./submission/submission.csv`               ← where the final predictions must be saved
+
+CRITICAL RULES:
+1. NEVER use `sample_submission.csv` as the test set — it is a format template, not data.
+2. NEVER hardcode absolute paths — always use DATA_DIR / METADATA_DIR env vars.
+3. For generating the Kaggle submission: read `test.csv` (from DATA_DIR), predict, save to `./submission/submission.csv`.
+4. For validation metric: evaluate predictions against `val.csv` (from METADATA_DIR).
+
+Example 4 — Fix wrong test file (using sample_submission as test):
+<fix>
+<file>main.py</file>
+<description>Use test.csv from DATA_DIR instead of sample_submission as test set</description>
+<old_code>
+test_df = pd.read_csv(os.path.join(DATA_DIR, 'sample_submission.csv'))
+</old_code>
+<new_code>
+test_df = pd.read_csv(os.path.join(DATA_DIR, 'test.csv'))
+</new_code>
+</fix>
+
+Example 5 — Fix hardcoded path (FileNotFoundError on data file):
+<fix>
+<file>main.py</file>
+<description>Use METADATA_DIR env var instead of hardcoded relative path</description>
+<old_code>
+train_df = pd.read_csv('train.csv')
+val_df   = pd.read_csv('val.csv')
+</old_code>
+<new_code>
+import os
+METADATA_DIR = os.environ.get('METADATA_DIR', './metadata')
+train_df = pd.read_csv(os.path.join(METADATA_DIR, 'train.csv'))
+val_df   = pd.read_csv(os.path.join(METADATA_DIR, 'val.csv'))
+</new_code>
+</fix>
 
 ## DEBUG LESSONS FROM PREVIOUS ATTEMPTS
 
 {debug_lessons if debug_lessons else "No previous lessons."}
 
+{f"## PREVIOUS FIX ATTEMPTS (all failed - do not repeat these approaches){chr(10)}{previous_attempts}{chr(10)}" if previous_attempts else ""}
 ---
 
 Now output your fix(es) using the EXACT XML format shown above. Start with <fix>:
 """
 
         return prompt
+
+    def _enrich_error_with_context(
+        self,
+        execution_error: str,
+        files: Dict[str, str],
+        context_lines: int = 5,
+    ) -> str:
+        """
+        Enrich a traceback with inline code snippets from each frame.
+
+        Parses lines like:
+            File "working/solution/main.py", line 42, in train_model
+        and appends the surrounding source lines so the LLM sees the
+        actual code that caused the error — not just the error message.
+        """
+        if not execution_error or not files:
+            return execution_error
+
+        frame_pattern = re.compile(
+            r'File\s+"[^"]*[\\/]?(\w+\.py)",\s+line\s+(\d+),\s+in\s+(\S+)'
+        )
+
+        enriched_parts = [execution_error, "\n\n--- CODE CONTEXT FROM TRACEBACK ---"]
+        seen_frames = set()
+
+        for m in frame_pattern.finditer(execution_error):
+            fname, lineno_str, func = m.group(1), m.group(2), m.group(3)
+            key = (fname, lineno_str)
+            if key in seen_frames:
+                continue
+            seen_frames.add(key)
+
+            code = files.get(fname, "")
+            if not code:
+                continue
+
+            try:
+                lineno = int(lineno_str)
+                code_lines = code.splitlines()
+                start = max(0, lineno - context_lines - 1)
+                end = min(len(code_lines), lineno + context_lines)
+                snippet_lines = []
+                for i, line in enumerate(code_lines[start:end], start=start + 1):
+                    marker = ">>>" if i == lineno else "   "
+                    snippet_lines.append(f"{marker} {i:4d}: {line}")
+                snippet = "\n".join(snippet_lines)
+                enriched_parts.append(
+                    f"\n[{fname}:{lineno} in {func}]\n{snippet}"
+                )
+            except (ValueError, IndexError):
+                continue
+
+        if len(enriched_parts) == 2:  # No frames found
+            return execution_error
+
+        return "\n".join(enriched_parts)
 
     def _get_relevant_context(
         self,
@@ -400,21 +549,28 @@ Now output your fix(es) using the EXACT XML format shown above. Start with <fix>
                 result_parts.append(file_text)
                 current_size += len(file_text)
 
-        # Add other files (signatures only if space is tight)
+        # Add other files — always include at least signatures so the model
+        # knows what functions/classes are available in every module.
+        # Full code when space allows, signatures-only otherwise.
         for filename, code in other_files:
             remaining = max_chars - current_size
-            if remaining < 500:
-                break
+            if remaining < 200:
+                # Still add a minimal header so the model knows the file exists
+                result_parts.append(f"=== {filename} (omitted - context limit) ===\n")
+                continue
 
+            signatures = self._extract_signatures_quick(code)
             if len(code) <= remaining - 100:
                 result_parts.append(f"=== {filename} ===\n{code}\n")
                 current_size += len(code) + 50
+            elif len(signatures) <= remaining - 100:
+                result_parts.append(f"=== {filename} (signatures only) ===\n{signatures}\n")
+                current_size += len(signatures) + 50
             else:
-                # Include only function/class signatures
-                signatures = self._extract_signatures_quick(code)
-                if len(signatures) < remaining - 100:
-                    result_parts.append(f"=== {filename} (signatures only) ===\n{signatures}\n")
-                    current_size += len(signatures) + 50
+                # Even signatures don't fit — include a truncated version
+                truncated_sig = signatures[:remaining - 150] + "\n# ... (truncated)"
+                result_parts.append(f"=== {filename} (signatures only, truncated) ===\n{truncated_sig}\n")
+                current_size = max_chars
 
         if not result_parts:
             return files_text[:max_chars]
@@ -1064,6 +1220,21 @@ ERROR:
 
 ANALYSIS:
 {error_analysis[:1500]}
+
+DATA FILE LOCATIONS (use env vars — NEVER hardcode paths):
+```python
+import os
+DATA_DIR     = os.environ.get('DATA_DIR', '.')
+METADATA_DIR = os.environ.get('METADATA_DIR', './metadata')
+# train.csv (full):  os.path.join(DATA_DIR, 'train.csv')
+# test.csv:          os.path.join(DATA_DIR, 'test.csv')        <- predictions go here
+# sample_submission: os.path.join(DATA_DIR, 'sample_submission.csv')  <- FORMAT TEMPLATE ONLY, NOT test data
+# train split (80%): os.path.join(METADATA_DIR, 'train.csv')
+# val split (20%):   os.path.join(METADATA_DIR, 'val.csv')
+# submission output: ./submission/submission.csv
+```
+CRITICAL: sample_submission.csv is a FORMAT TEMPLATE — never load it as the test set.
+Always generate predictions from test.csv (DATA_DIR) for the Kaggle submission.
 
 REQUIREMENTS:
 1. Output the COMPLETE file in a single ```python block

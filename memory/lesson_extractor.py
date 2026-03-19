@@ -106,6 +106,7 @@ class LessonExtractor:
                     old_time=best_node.execution_time if best_node else None,
                     new_time=new_node.execution_time,
                     time_delta=self._compute_time_delta(new_node, best_node),
+                    challenge_name=self.lesson_pool.challenge_name,
                 )
 
                 # Add to pool (with deduplication)
@@ -227,6 +228,7 @@ class LessonExtractor:
                     fix_description=lesson_data.get("fix", ""),
                     error_type=self._extract_error_type(source_error),
                     source_node_id=fixed_node.id,
+                    challenge_name=self.lesson_pool.challenge_name,
                 )
                 
                 # Add to pool
@@ -239,6 +241,93 @@ class LessonExtractor:
             print(f"  ✗ Failed to extract debug lesson: {e}")
             return None
     
+    def extract_module_debug_lesson(
+        self,
+        module_name: str,
+        original_code: str,
+        fixed_code: Optional[str],
+        error: str,
+        error_analysis: str,
+        fixed: bool,
+    ) -> Optional[DebugLesson]:
+        """
+        Extract a debug lesson from a module unit-test failure.
+
+        Unlike extract_debug_lesson (which requires TreeNodes), this method
+        works with raw code strings — suitable for module-level debugging
+        where no MCTS node exists yet.
+
+        Args:
+            module_name: Filename of the module (e.g. "feature_engineering.py")
+            original_code: The buggy code
+            fixed_code: The repaired code (None if fix failed)
+            error: Stderr / error traceback from the test run
+            error_analysis: Diagnosis produced by DebugAgent.analyze_error
+            fixed: Whether the fix was successfully applied
+        """
+        print(f"\n[Module Debug Lesson] Extracting lesson for {module_name}")
+
+        # Build a synthetic diff
+        if fixed_code and fixed_code != original_code:
+            udiff = list(difflib.unified_diff(
+                original_code.splitlines(keepends=True),
+                fixed_code.splitlines(keepends=True),
+                fromfile=f"a/{module_name}",
+                tofile=f"b/{module_name}",
+                n=3,
+            ))
+            diff = "".join(udiff[:300]) if udiff else "No diff available."
+        else:
+            diff = "Fix was not applied." if not fixed else "No code changes."
+
+        final_result = "Fixed" if fixed else "Still failing"
+
+        source_files = f"=== {module_name} ===\n{original_code[:4000]}"
+
+        prompt = self.prompt_manager.get_prompt(
+            "debug_lesson",
+            source_files=source_files,
+            source_exec_result=error[:1000],
+            source_error_analysis=error_analysis[:800],
+            diff=diff[:1500],
+            final_exec_result=final_result,
+        )
+
+        try:
+            response = self.client.chat_completion(
+                messages=[
+                    {"role": "system", "content": "You are an expert Python debugger."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.1,
+                max_tokens=4000,
+            )
+
+            lesson_data = self._parse_debug_lesson_response(response["content"])
+
+            if lesson_data:
+                lesson = DebugLesson(
+                    id=self.lesson_pool.generate_lesson_id(LessonType.DEBUG),
+                    type=LessonType.DEBUG,
+                    title=lesson_data["title"],
+                    explanation=lesson_data["explanation"],
+                    detection=lesson_data["detection"],
+                    fix_description=lesson_data.get("fix", ""),
+                    error_type=self._extract_error_type(error),
+                    source_node_id=f"module_{module_name}",
+                    challenge_name=self.lesson_pool.challenge_name,
+                )
+
+                if self.lesson_pool.add_lesson(lesson, check_duplicate=True):
+                    print(f"  [Module Debug Lesson] Saved: {lesson.title}")
+                    return lesson
+
+            return None
+
+        except Exception as e:
+            print(f"  [Module Debug Lesson] Failed: {e}")
+            return None
+
     def _format_solution(self, node: TreeNode) -> str:
         """Format solution as string"""
         solution = node.solution

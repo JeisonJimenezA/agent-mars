@@ -104,9 +104,8 @@ class FileManager:
 
     def copy_metadata(self, solution_dir: Path, metadata_source: Path):
         """
-        Link metadata directory into solution directory (no data copy).
-        Uses a junction on Windows or a symlink on Unix so that data is
-        read directly from the original metadata path.
+        Copy metadata directory into solution directory.
+        Uses a physical copy so generated code cannot modify the original splits.
 
         Args:
             solution_dir: Target directory
@@ -120,8 +119,6 @@ class FileManager:
             if target_metadata.is_symlink():
                 target_metadata.unlink()
             elif sys.platform == "win32":
-                # On Windows, junctions appear as dirs but rmtree fails on them.
-                # os.rmdir removes the junction without deleting the target contents.
                 try:
                     os.rmdir(target_metadata)
                 except OSError:
@@ -129,7 +126,7 @@ class FileManager:
             else:
                 shutil.rmtree(target_metadata)
 
-        self._create_directory_link(target_metadata, metadata_source)
+        shutil.copytree(metadata_source, target_metadata)
 
     def copy_input_data(self, solution_dir: Path, input_source: Path):
         """

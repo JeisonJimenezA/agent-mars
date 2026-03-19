@@ -1,3 +1,28 @@
+==== Problem Description ====
+{problem_description}
+
+==== Metric to Optimize ====
+{metric_name}
+
+==== Data Schema ====
+{data_schema}
+
+==== Data File Locations ====
+Always use env vars — never hardcode paths:
+  import os
+  DATA_DIR     = os.environ.get('DATA_DIR', '.')
+  METADATA_DIR = os.environ.get('METADATA_DIR', './metadata')
+
+  os.path.join(DATA_DIR, 'train.csv')             <- full original train set
+  os.path.join(DATA_DIR, 'test.csv')              <- TEST SET for generating submission predictions
+  os.path.join(DATA_DIR, 'sample_submission.csv') <- FORMAT TEMPLATE ONLY, NOT the test set
+  os.path.join(METADATA_DIR, 'train.csv')         <- 80% training split (for model fitting)
+  os.path.join(METADATA_DIR, 'val.csv')           <- 20% validation split (for metric evaluation)
+  ./submission/submission.csv                     <- output file for final predictions
+
+==== EDA Report ====
+{eda_report}
+
 ==== Debug Lessons ====
 {lessons}
 

@@ -1,8 +1,20 @@
 ==== Problem ====
 {problem_description}
 
+==== Metric to Optimize ====
+{metric_name}
+
+==== Data Schema ====
+{data_schema}
+
+==== EDA Report ====
+{eda_report}
+
 ==== Solution Idea ====
 {idea}
+
+==== Lessons from Previous Runs ====
+{lessons}
 
 ==== Task ====
 Design a modular Python repository to implement this ML solution.
@@ -31,15 +43,7 @@ You must decompose the solution into PYTHON FILES (modules).
    - Split complex modules: e.g., instead of one huge "model.py", use
      "model_lgbm.py", "model_xgb.py", "model_ensemble.py"
 
-4. **MODULE SIZE LIMIT (CRITICAL)**:
-   - Each module description should result in code < 500 lines
-   - If a module would be larger, SPLIT IT into multiple modules
-   - Example splits:
-     - feature_engineering → feature_basic.py + feature_advanced.py
-     - model → model_base.py + model_lgbm.py + model_xgb.py
-     - data_loader → data_loader.py + data_preprocessor.py
-
-5. **Descriptions**: For each module, describe:
+4. **Descriptions**: For each module, describe:
    - Purpose (what it does)
    - Key classes/functions to implement (2-4 max per module)
    - How it interacts with other modules

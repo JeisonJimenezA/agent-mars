@@ -111,6 +111,14 @@ class TreeNode:
         self.improvement_attempts: int = 0  # Number of IMPROVE children
         self.debug_attempts: int = 0        # Number of DEBUG attempts
         self.is_fully_expanded: bool = False
+
+        # Debug history for multi-turn context (summaries of previous attempts)
+        self.debug_history: List[str] = []
+
+        # Modification history: short descriptions of improvements applied to this lineage
+        # Inherited from parent and extended by each IMPROVE node so the improver
+        # knows what has already been tried along this branch.
+        self.applied_modifications: List[str] = []
     
     def add_child(self, child: 'TreeNode') -> 'TreeNode':
         """Add a child node"""

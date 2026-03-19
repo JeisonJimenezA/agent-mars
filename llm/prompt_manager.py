@@ -33,6 +33,7 @@ class PromptManager:
             "modular_decomposition": "modular_decomposition.txt",
             
             # Implementation
+            "monolithic_draft": "monolithic_draft.txt",
             "module_implementation": "module_implementation.txt",
             "module_testing": "module_testing.txt",
             "solution_drafting": "solution_drafting.txt",
@@ -157,8 +158,8 @@ class PromptManager:
             "file_description": "Module implementation",
             
             # Execution parameters
-            "exec_timeout": "1 hour 30 minutes",
-            "timeout": "5400",
+            "exec_timeout": "2 hours",
+            "timeout": "7200",
             
             # Code/Files
             "library_files": "No existing files.",
@@ -211,6 +212,10 @@ class PromptManager:
             "code_diff": "No code differences available.",
             "execution_output": "",
             "review_findings": "No review findings available.",
+
+            # Metric & schema context
+            "metric_name": "unknown",
+            "data_schema": "No schema available.",
 
             # Hardware context (detected once at runtime, cached)
             "hardware_context": get_hardware_context(),

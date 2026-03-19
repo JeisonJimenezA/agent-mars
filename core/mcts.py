@@ -119,14 +119,26 @@ class MCTSEngine:
             return self.root
         
         # Traverse down the tree
+        visited = set()
         while not self._is_expandable(node):
-            if len(node.children) == 0:
-                # Leaf node that's fully expanded -> reactivate root
+            node_id = id(node)
+            if node_id in visited:
+                # Cycle detected — force reactivate root to break out
+                print("  [MCTS] Cycle in selection, force-reactivating root")
+                self.root.is_fully_expanded = False
+                self.valid_nodes_since_improvement = 0
                 return self.root
-            
+            visited.add(node_id)
+
+            if len(node.children) == 0:
+                # Leaf node that's fully expanded -> reactivate root so it can draft again
+                self.root.is_fully_expanded = False
+                self.valid_nodes_since_improvement = 0
+                return self.root
+
             # Select best child using UCT
             node = self._select_best_child(node)
-        
+
         return node
     
     def _select_best_child(self, node: TreeNode) -> TreeNode:
@@ -279,7 +291,7 @@ class MCTSEngine:
     
     def save_search_log(self, filepath: Path):
         """Save search log to JSON"""
-        with open(filepath, 'w') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(self.search_log, f, indent=2)
     
     def get_statistics(self) -> dict:

@@ -93,7 +93,7 @@ Provide COMPLETE working code in a single ```python block:
 # Your implementation here
 ```
 
-**SIZE LIMIT**: Keep under 400 lines. Prioritize working code over comprehensive code.
+Write as many lines as needed — never truncate functions with "..." or placeholders. If the implementation is long, write it completely.
 
 ---
 
@@ -110,11 +110,20 @@ Implement module: `{file_name}`
 ### Problem Description
 {problem_description}
 
+### Metric to Optimize
+**{metric_name}** — optimize every design decision toward this metric.
+
+### Data Schema (columns, types, sample values)
+{data_schema}
+
 ### EDA Report
 {eda_report}
 
 ### Solution Approach
 {idea}
+
+### Lessons from Previous Runs (avoid repeating past mistakes)
+{lessons}
 
 ### Execution Environment
 {hardware_context}
@@ -130,11 +139,13 @@ METADATA_DIR = os.environ.get('METADATA_DIR', './metadata')
 ```
 
 - Full training set: `os.path.join(DATA_DIR, 'train.csv')`
-- Test set:         `os.path.join(DATA_DIR, 'test.csv')`
+- Test set:         `os.path.join(DATA_DIR, 'test.csv')` ← use ALL rows for predictions
 - Train split (80%): `os.path.join(METADATA_DIR, 'train.csv')`
 - Val split (20%):   `os.path.join(METADATA_DIR, 'val.csv')`
-- Sample submission: `os.path.join(DATA_DIR, 'sample_submission.csv')`
+- Sample submission: `os.path.join(DATA_DIR, 'sample_submission.csv')` ← format template ONLY
 - Cache directory:   `./working/cache/`
+
+CRITICAL: `sample_submission.csv` is a format template, NOT the test set. Never use it to filter or replace `test.csv`. Always generate predictions for every row in `test.csv`.
 
 ---
 

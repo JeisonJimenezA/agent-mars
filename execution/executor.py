@@ -5,6 +5,7 @@ import signal
 import os
 import sys
 import re
+import threading
 from pathlib import Path
 from typing import Optional, Dict, Tuple, List
 from dataclasses import dataclass
@@ -86,7 +87,7 @@ MODULE_TO_PACKAGE = {
 @dataclass
 class ExecutionConfig:
     """Configuration for code execution"""
-    timeout: int = 10800  # 3 hours default
+    timeout: int = 7200  # 2 hours default
     max_memory_mb: int = 30000  # 30GB
     capture_output: bool = True
     working_dir: Optional[Path] = None
@@ -168,11 +169,13 @@ class Executor:
 
         # Add Python path
         env['PYTHONPATH'] = str(working_dir)
+        # Disable output buffering so training progress prints in real time
+        env['PYTHONUNBUFFERED'] = '1'
         
         try:
             # Start process using virtual environment Python
             self.current_process = subprocess.Popen(
-                [self._python_executable, str(filepath)],
+                [self._python_executable, "-u", str(filepath)],
                 stdout=subprocess.PIPE if self.config.capture_output else None,
                 stderr=subprocess.PIPE if self.config.capture_output else None,
                 cwd=str(working_dir),
@@ -180,49 +183,68 @@ class Executor:
                 text=True,
                 bufsize=1,
             )
-            
-            # Monitor execution
+
+            stdout_lines: List[str] = []
+            stderr_lines: List[str] = []
+
+            def _stream(pipe, lines: List[str], prefix: str):
+                for line in pipe:
+                    lines.append(line)
+                    print(f"{prefix}{line}", end="", flush=True)
+
+            if self.config.capture_output:
+                t_out = threading.Thread(target=_stream, args=(self.current_process.stdout, stdout_lines, ""), daemon=True)
+                t_err = threading.Thread(target=_stream, args=(self.current_process.stderr, stderr_lines, "[STDERR] "), daemon=True)
+                t_out.start()
+                t_err.start()
+
+            # Wait for process with timeout
             try:
-                stdout, stderr = self.current_process.communicate(timeout=timeout)
+                self.current_process.wait(timeout=timeout)
+                if self.config.capture_output:
+                    t_out.join()
+                    t_err.join()
                 return_code = self.current_process.returncode
-                
+
+                stdout = "".join(stdout_lines)
+                stderr = "".join(stderr_lines)
                 execution_time = time.time() - start_time
-                
-                # Check success
+
                 success = return_code == 0
-                
-                # Extract validation metric if present
                 metric_value = self._extract_metric_from_output(stdout)
                 validation_metric_valid = metric_value is not None
-                
+
                 result = ExecutionResult(
                     success=success,
                     metric_value=metric_value,
                     execution_time=execution_time,
-                    stdout=stdout or "",
-                    stderr=stderr or "",
+                    stdout=stdout,
+                    stderr=stderr,
                     error_message="" if success else f"Exit code: {return_code}",
                     validation_metric_valid=validation_metric_valid
                 )
-                
-                print(f"  ✓ Completed in {execution_time:.1f}s")
+
+                print(f"\n  ✓ Completed in {execution_time:.1f}s")
                 if metric_value:
                     print(f"  ✓ Metric: {metric_value:.6f}")
-                
+
                 return result
-                
+
             except subprocess.TimeoutExpired:
                 # Kill process if timeout
                 self._kill_process_tree(self.current_process.pid)
-                
+                if self.config.capture_output:
+                    t_out.join(timeout=2)
+                    t_err.join(timeout=2)
+
                 execution_time = time.time() - start_time
-                
+
                 return ExecutionResult(
                     success=False,
                     metric_value=None,
                     execution_time=execution_time,
-                    stdout="",
-                    stderr="",
+                    stdout="".join(stdout_lines),
+                    stderr="".join(stderr_lines),
                     error_message=f"Execution timeout after {timeout}s",
                     validation_metric_valid=False
                 )
@@ -245,31 +267,55 @@ class Executor:
     
     def _extract_metric_from_output(self, stdout: str) -> Optional[float]:
         """
-        Extract validation metric from stdout.
-        
-        Looks for pattern: "Final Validation Metric: <value>"
-        
-        Args:
-            stdout: Standard output from execution
-            
-        Returns:
-            Metric value or None
+        Extract validation metric from stdout using multiple strategies.
+
+        Strategy 1 (primary): canonical pattern "Final Validation Metric: X"
+        Strategy 2: common metric label patterns (Score, Accuracy, F1, AUC, etc.)
+        Strategy 3: heuristic — last reasonable float in last 300 chars of output
         """
         if not stdout:
             return None
-        
-        import re
-        
-        # Pattern from paper's requirement
-        pattern = r'Final Validation Metric:\s*([\d.]+)'
-        match = re.search(pattern, stdout, re.IGNORECASE)
-        
+
+        # ── Strategy 1: canonical pattern ──────────────────────────────
+        match = re.search(r'Final\s+Validation\s+Metric\s*[:=]\s*([\d.eE+\-]+)',
+                          stdout, re.IGNORECASE)
         if match:
             try:
                 return float(match.group(1))
             except ValueError:
                 pass
-        
+
+        # ── Strategy 2: labelled metric patterns ───────────────────────
+        labelled_patterns = [
+            r'(?:val(?:idation)?|best|final)\s+(?:score|metric|loss|accuracy|acc|auc|f1|mae|mse|rmse|r2)\s*[:=]\s*([\d.eE+\-]+)',
+            r'(?:score|metric|loss|accuracy|acc|auc|f1|mae|mse|rmse|r2)\s*[:=]\s*([\d.eE+\-]+)',
+            r'(?:cv|cross.?val)\s+(?:score|mean)\s*[:=]\s*([\d.eE+\-]+)',
+        ]
+        for pat in labelled_patterns:
+            # Search the last 2000 chars to prefer final values
+            tail = stdout[-2000:]
+            m = None
+            for candidate in re.finditer(pat, tail, re.IGNORECASE):
+                m = candidate  # keep last match
+            if m:
+                try:
+                    v = float(m.group(1))
+                    if not (v != v):  # not NaN
+                        return v
+                except ValueError:
+                    pass
+
+        # ── Strategy 3: heuristic — last plausible float ───────────────
+        # Scan the last 300 chars for floats that look like a metric
+        tail = stdout[-300:]
+        floats = re.findall(r'\b(0\.\d+|\d+\.\d+)\b', tail)
+        if floats:
+            # Prefer values in common metric ranges [0, 1] or small positives
+            candidates = [float(f) for f in floats]
+            in_range = [v for v in candidates if 0.0 <= v <= 1.0]
+            if in_range:
+                return in_range[-1]  # Last one printed wins
+
         return None
     
     def _kill_process_tree(self, pid: int):

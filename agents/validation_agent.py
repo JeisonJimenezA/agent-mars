@@ -95,7 +95,15 @@ class ValidationAgent(BaseAgent):
         """
         self.log("Checking for data leakage (static analysis)...")
 
+        # Strip comment-only lines to avoid false positives from commented-out code
+        code_active = "\n".join(
+            line for line in code.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        )
+
         issues = []
+        # Use code_active (comments removed) for pattern matching
+        code = code_active
 
         # ── Pattern 1: Fitting on test data ──
         # fit() or fit_transform() called with test/val in variable name

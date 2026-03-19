@@ -1,9 +1,11 @@
 # orchestrator.py
 from pathlib import Path
 from typing import Optional, Dict, List
+import ast
 import time
 import json
 import re
+import os
 
 from core.config import Config
 from utils.debug_logger import get_debug_logger
@@ -11,6 +13,7 @@ from core.mcts import MCTSEngine
 from core.tree_node import TreeNode, Solution, ActionType, NodeStatus, ExecutionResult
 from memory.lesson_pool import LessonPool
 from memory.lesson_extractor import LessonExtractor
+from memory.lesson_types import LessonType
 from agents.idea_agent import IdeaAgent
 from agents.modular_agent import ModularAgent
 from agents.coding_agent import CodingAgent
@@ -18,6 +21,7 @@ from agents.debug_agent import DebugAgent
 from agents.review_agent import ReviewAgent
 from agents.solution_improver import SolutionImprover
 from agents.validation_agent import ValidationAgent
+from mle.eda_agent import EDAAgent
 from utils.file_manager import FileManager
 from utils.tree_visualizer import TreeVisualizer
 from execution.executor import Executor, ExecutionConfig
@@ -39,6 +43,7 @@ class MARSOrchestrator:
         working_dir: Optional[Path] = None,
         lower_is_better: bool = False,
         metric_name: str = "metric",
+        data_schema: str = "",
     ):
         self.problem_description = problem_description
         self.eda_report = eda_report
@@ -48,10 +53,13 @@ class MARSOrchestrator:
         self.working_dir = working_dir or Config.WORKING_DIR
         self.lower_is_better = lower_is_better
         self.metric_name = metric_name
+        self.data_schema = data_schema
+        # Extract challenge name from working_dir name as identifier for lesson scoping
+        self.challenge_name = Path(working_dir).name if working_dir else ""
 
         # Initialize components
         self.mcts = MCTSEngine(time_budget=time_budget, lower_is_better=lower_is_better)
-        self.lesson_pool = LessonPool()
+        self.lesson_pool = LessonPool(challenge_name=self.challenge_name)
 
         # Load lessons from previous runs if they exist
         lesson_path = self.working_dir / "lessons.json"
@@ -75,7 +83,7 @@ class MARSOrchestrator:
 
         # Initialize utilities
         self.file_manager = FileManager(self.working_dir)
-        self.executor = Executor(ExecutionConfig(timeout=3600))
+        self.executor = Executor(ExecutionConfig(timeout=7200))
         self.validator = SolutionValidator()
         self.debug_logger = get_debug_logger()
 
@@ -91,6 +99,10 @@ class MARSOrchestrator:
         # Validation verification limit (Mejora 4)
         self._validation_verified_count = 0
         self._MAX_VALIDATION_CHECKS = 3  # Only verify first 3 valid solutions
+
+        # EDA augmentation: enrich EDA report with lesson insights every N iterations
+        self._eda_refresh_interval: int = int(os.getenv("EDA_REFRESH_INTERVAL", "10"))
+        self._last_eda_refresh: int = 0
 
     def run(self) -> TreeNode:
         """
@@ -114,11 +126,21 @@ class MARSOrchestrator:
         print("=" * 70 + "\n")
 
         self.start_time = time.time()
+        # Emergency budget threshold: 5 minutes before deadline
+        _emergency_threshold = max(300, self.time_budget * 0.05)
 
         # Main MCTS loop
         for new_node in self.mcts.search():
             self.iterations += 1
             elapsed = time.time() - self.start_time
+
+            # ── Emergency mode: time almost up ────────────────────────
+            if self.time_budget - elapsed <= _emergency_threshold:
+                self.log(
+                    f"[EMERGENCY] Only {self.time_budget - elapsed:.0f}s left "
+                    f"— submitting best solution found so far"
+                )
+                break
 
             print(f"\n{'=' * 70}")
             print(f"ITERATION {self.iterations} | Elapsed: {elapsed:.1f}s / {self.time_budget}s")
@@ -157,7 +179,7 @@ class MARSOrchestrator:
                 debug_attempt += 1
                 print(f"\n  [Debug Loop] Attempt {debug_attempt}/{max_debug}")
 
-                fixed = self._debug_solution_inline(new_node)
+                fixed = self._debug_solution_inline(new_node, attempt=debug_attempt, max_attempts=max_debug)
                 if not fixed:
                     print(f"  [Debug Loop] Could not generate fix, stopping debug loop")
                     break
@@ -210,6 +232,9 @@ class MARSOrchestrator:
             # Save progress
             self._save_progress()
 
+            # Augment EDA report with accumulated lesson insights
+            self._augment_eda_if_needed()
+
         # Search complete
         print("\n" + "=" * 70)
         print("SEARCH COMPLETE")
@@ -246,31 +271,304 @@ class MARSOrchestrator:
             return False
 
     def _draft_solution(self, node: TreeNode) -> bool:
-        """Draft a new solution from scratch (Algorithm 2, lines 16-22)."""
+        """
+        Draft a new solution from scratch (Algorithm 2, lines 16-22).
 
-        # Curriculum-based idea generation (Mejora 3)
+        Uses a MONOLITHIC approach: generates a single self-contained main.py
+        with all logic inline. This avoids cross-module import mismatches that
+        cause most runtime errors with GLM-5. Modular refactoring happens in
+        IMPROVE iterations once a working baseline exists.
+        """
+        idea = self._generate_idea()
+        if not idea:
+            return False
+
+        self.log("Drafting monolithic main.py...")
+        main_code = self._generate_monolithic_script(idea)
+        if not main_code:
+            return False
+
+        node.solution = Solution(
+            idea=idea,
+            modules={},          # No separate modules in DRAFT
+            main_script=main_code,
+            module_descriptions={},
+        )
+
+        self.log("Monolithic draft complete")
+        return True
+
+    def _generate_idea(self) -> Optional[str]:
+        """Generate or improve an idea using the IdeaAgent."""
         if len(self.idea_agent.generated_ideas) == 0:
-            idea = self.idea_agent.generate_initial_idea(
+            return self.idea_agent.generate_initial_idea(
                 self.problem_description,
                 self.eda_report,
                 [],
             )
-        else:
-            idea = self.idea_agent.improve_idea(
-                self.problem_description,
-                self.eda_report,
-                self.lesson_pool,
-                previous_ideas=self.idea_agent.generated_ideas,
-                valid_solutions_count=self.valid_solutions_count,
-                stagnation_count=self.stagnation_count,
+
+        best_solution_code = None
+        if self.mcts.best_node and self.mcts.best_node.solution:
+            files = self.mcts.best_node.solution.get_all_files()
+            best_solution_code = "\n\n".join(
+                f"=== {fname} ===\n{code}" for fname, code in files.items()
             )
 
-        if not idea:
-            return False
+        return self.idea_agent.improve_idea(
+            self.problem_description,
+            self.eda_report,
+            self.lesson_pool,
+            previous_ideas=self.idea_agent.generated_ideas,
+            valid_solutions_count=self.valid_solutions_count,
+            stagnation_count=self.stagnation_count,
+            best_solution_code=best_solution_code,
+        )
 
-        # Decompose into modules
+    def _generate_monolithic_script(self, idea: str) -> Optional[str]:
+        """
+        Generate a single self-contained main.py with all pipeline logic inline.
+        No imports from sibling files — eliminates cross-module API mismatches.
+
+        Handles token-limit truncation via continuation: if the model stops
+        mid-script, sends up to MAX_CONTINUATIONS follow-up requests that
+        pick up from the last generated line.
+        """
+        from utils.hardware_info import get_hardware_context
+        hardware_context = get_hardware_context()
+
+        lessons_text = self.lesson_pool.format_for_prompt(
+            lesson_type=None, k=10
+        ) if self.lesson_pool else ""
+
+        try:
+            prompt = self.coding_agent.prompt_manager.get_prompt(
+                "monolithic_draft",
+                problem_description=self.problem_description,
+                idea=idea,
+                metric_name=self.metric_name or "unknown",
+                data_schema=self.data_schema or "Not available",
+                eda_report=self.eda_report or "Not available",
+                lessons=lessons_text or "No lessons yet.",
+                hardware_context=hardware_context,
+            )
+        except Exception as e:
+            self.log(f"Prompt load failed ({e}), using fallback")
+            prompt = self._monolithic_fallback_prompt(idea, lessons_text, hardware_context)
+
+        from agents.coding_agent import _STREAM
+        response = self.coding_agent.call_llm(
+            user_message=prompt,
+            temperature=0.2,
+            max_tokens=Config.MAX_TOKENS,
+            stream=_STREAM,
+        )
+
+        raw_content = response["content"]
+        code, truncated = self._extract_and_detect_truncation(raw_content)
+
+        if not code:
+            self.log("Failed to extract code from monolithic draft response")
+            return None
+
+        # ── Continuation loop for truncated responses ──────────────────
+        MAX_CONTINUATIONS = 3
+        continuation = 0
+        while truncated and continuation < MAX_CONTINUATIONS:
+            continuation += 1
+            self.log(
+                f"Response truncated (attempt {continuation}/{MAX_CONTINUATIONS}) "
+                f"— requesting continuation ({len(code)} chars so far)"
+            )
+            extra_code, still_truncated = self._continue_truncated_code(code)
+            if not extra_code:
+                self.log("Continuation returned no code — stopping")
+                break
+            code = code.rstrip() + "\n" + extra_code.lstrip()
+            truncated = still_truncated
+
+        if truncated:
+            self.log("Script still truncated after continuations — attempting repair")
+            code = self._repair_truncated_script(code)
+
+        if not code:
+            return None
+
+        is_valid, error = self.coding_agent.parser.validate_syntax(code)
+        if not is_valid:
+            self.log(f"Monolithic draft has syntax error: {error} — attempting fix")
+            fixed = self.coding_agent._ask_llm_to_fix_syntax(code, error, "main.py")
+            if fixed:
+                is_valid, _ = self.coding_agent.parser.validate_syntax(fixed)
+                if is_valid:
+                    self.log(f"Syntax fixed, final size: {len(fixed)} chars")
+                    return fixed
+            return None
+
+        self.log(f"Monolithic main.py generated ({len(code)} chars, {code.count(chr(10))} lines)")
+        return code
+
+    def _extract_and_detect_truncation(self, raw: str) -> tuple:
+        """
+        Extract Python code from LLM response and detect if it was truncated.
+
+        Returns (code, is_truncated).
+        Truncation signals:
+        - No closing ``` after the opening ```python
+        - Code ends mid-statement (open parenthesis, trailing comma, etc.)
+        - AST parse fails with EOF error
+        """
+        if not raw:
+            return None, False
+
+        # Try clean closed block first
+        import re as _re
+        closed = _re.search(r'```python\s*\n(.*?)```', raw, _re.DOTALL | _re.IGNORECASE)
+        if closed:
+            return closed.group(1).strip(), False  # Properly closed — not truncated
+
+        # Check for unclosed block (truncation)
+        unclosed = _re.search(r'```python\s*\n(.+)$', raw, _re.DOTALL | _re.IGNORECASE)
+        if unclosed:
+            code = unclosed.group(1).strip()
+            if len(code) > 100:
+                return code, True  # Truncated
+
+        # Fallback: use existing extractor, mark as possibly truncated
+        code = self.coding_agent._extract_code_from_response(raw)
+        if code:
+            # Truncated if raw response doesn't end with closing ```
+            is_truncated = not raw.rstrip().endswith("```")
+            return code, is_truncated
+
+        return None, False
+
+    def _continue_truncated_code(self, existing_code: str) -> tuple:
+        """
+        Ask the model to continue a truncated script.
+        Passes the FULL existing code so the model has complete context.
+        Returns (continuation_code, still_truncated).
+        """
+        from agents.coding_agent import _STREAM
+        continuation_prompt = f"""The Python script below was cut off mid-generation due to output length limits.
+Continue writing from EXACTLY where it stopped. Do NOT repeat any code already shown.
+Write only what comes next, ending with ``` when the script is fully complete.
+
+FULL SCRIPT SO FAR:
+```python
+{existing_code}
+```
+
+Continue the script from the next line:
+```python
+"""
+        response = self.coding_agent.call_llm(
+            user_message=continuation_prompt,
+            temperature=0.1,
+            max_tokens=Config.MAX_TOKENS,
+            stream=_STREAM,
+        )
+
+        raw = response["content"]
+        code, still_truncated = self._extract_and_detect_truncation(raw)
+
+        # If continuation itself is a full closed block, take it
+        # If it's also unclosed, we got more code but may need another round
+        if not code:
+            # Last resort: take everything after the prompt marker
+            import re as _re
+            m = _re.search(r'```python\s*\n(.+)', raw, _re.DOTALL | _re.IGNORECASE)
+            if m:
+                code = m.group(1).strip()
+                still_truncated = not raw.rstrip().endswith("```")
+
+        return code, still_truncated
+
+    def _repair_truncated_script(self, code: str) -> Optional[str]:
+        """
+        Attempt to repair a script that's still truncated after continuations.
+        Tries to close open blocks so it at least parses as valid Python.
+        """
+        self.log("Attempting truncation repair...")
+        lines = code.split("\n")
+
+        # Remove incomplete last line (mid-token)
+        while lines:
+            last = lines[-1].strip()
+            if last and not last.endswith(
+                (":", ",", "(", "[", "{", "\\", "=", "+", "-", "*", "/", "and", "or", "not")
+            ) and last.count('"') % 2 == 0 and last.count("'") % 2 == 0:
+                break
+            lines.pop()
+
+        if not lines:
+            return None
+
+        repaired = "\n".join(lines)
+
+        # Try progressively adding closure tokens
+        for closure in ["", "\n", "\n    pass", "\n        pass", "\n)\n", "\n]\n"]:
+            candidate = repaired + closure
+            is_valid, _ = self.coding_agent.parser.validate_syntax(candidate)
+            if is_valid:
+                self.log(f"Repair succeeded ({len(candidate)} chars)")
+                return candidate
+
+        self.log("Repair failed — returning None")
+        return None
+
+    def _monolithic_fallback_prompt(
+        self, idea: str, lessons: str, hardware_context: str
+    ) -> str:
+        """Fallback prompt when monolithic_draft.txt template fails to load."""
+        return f"""Write a single self-contained Python script (main.py) that solves this ML problem.
+
+PROBLEM: {self.problem_description[:800]}
+
+APPROACH: {idea}
+
+METRIC TO OPTIMIZE: {self.metric_name or "unknown"}
+
+DATA SCHEMA: {self.data_schema or "Not available"}
+
+DATA LOCATIONS:
+import os
+DATA_DIR     = os.environ.get('DATA_DIR', '.')
+METADATA_DIR = os.environ.get('METADATA_DIR', './metadata')
+- Train (fit): os.path.join(METADATA_DIR, 'train.csv')
+- Val (eval):  os.path.join(METADATA_DIR, 'val.csv')
+- Test (pred): os.path.join(DATA_DIR, 'test.csv')
+- Output:      ./submission/submission.csv
+
+LESSONS FROM PREVIOUS RUNS:
+{lessons or "None yet."}
+
+HARDWARE: {hardware_context}
+
+REQUIREMENTS:
+1. Self-contained — all code in one file, no local imports
+2. Print exactly: Final Validation Metric: <value>
+3. Save predictions to ./submission/submission.csv
+4. ASCII only, no emojis
+5. Max 800 lines
+
+Provide code in a ```python block.
+"""
+
+    def _draft_solution_modular(self, node: TreeNode, idea: str) -> bool:
+        """
+        Modular draft: decomposes idea into separate .py files.
+        Called from IMPROVE iterations when a working monolithic baseline exists.
+
+        Validates cross-module imports before assembling to catch API mismatches
+        early.
+        """
         modules_desc = self.modular_agent.decompose_idea(
-            self.problem_description, idea
+            self.problem_description,
+            idea,
+            eda_report=self.eda_report,
+            lesson_pool=self.lesson_pool,
+            metric_name=self.metric_name,
+            data_schema=self.data_schema,
         )
         if not modules_desc:
             return False
@@ -280,11 +578,14 @@ class MARSOrchestrator:
             self.log(f"Invalid decomposition: {issues}")
             return False
 
-        # Implement modules
+        module_order = self.modular_agent.get_module_order(modules_desc)
+        self.log(f"  Module generation order: {module_order}")
+
         implemented_modules = {}
-        for module_name, module_desc in modules_desc.items():
-            if module_name == "main":
+        for module_name in module_order:
+            if module_name == "main" or module_name not in modules_desc:
                 continue
+            module_desc = modules_desc[module_name]
 
             code = self.coding_agent.implement_module(
                 self.problem_description,
@@ -294,25 +595,37 @@ class MARSOrchestrator:
                 implemented_modules,
                 self.lesson_pool,
                 eda_report=self.eda_report,
+                metric_name=self.metric_name,
+                data_schema=self.data_schema,
             )
 
             if code:
-                implemented_modules[f"{module_name}.py"] = code
+                filename = f"{module_name}.py"
+                import_issues = self._validate_cross_module_imports(
+                    filename, code, implemented_modules
+                )
+                if import_issues:
+                    self.log(f"  Cross-module import issues in {filename}: {import_issues}")
+                    code = self._fix_cross_module_imports(
+                        filename, code, import_issues, implemented_modules,
+                        idea, module_desc
+                    ) or code
+                implemented_modules[filename] = code
             else:
                 self.log(f"Failed to implement {module_name}")
 
-        # Unit-test modules (Algorithm 2, line 19-20)
         implemented_modules = self._test_and_debug_modules(
             idea, implemented_modules, modules_desc
         )
 
-        # Implement main script
         main_code = self.coding_agent.implement_main_script(
             self.problem_description,
             idea,
             implemented_modules,
             self.lesson_pool,
             eda_report=self.eda_report,
+            metric_name=self.metric_name,
+            data_schema=self.data_schema,
         )
         if not main_code:
             return False
@@ -324,7 +637,7 @@ class MARSOrchestrator:
             module_descriptions=modules_desc,
         )
 
-        self.log(f"Solution drafted: {len(implemented_modules)} modules + main")
+        self.log(f"Modular solution drafted: {len(implemented_modules)} modules + main")
         return True
 
     def _improve_solution(self, node: TreeNode) -> bool:
@@ -338,11 +651,23 @@ class MARSOrchestrator:
         self.log(f"Improving solution from parent node {parent.id}")
         self.log(f"  Parent metric: {parent.metric_value}")
 
+        # Collect modification history from entire parent lineage
+        lineage_mods: list = []
+        ancestor = parent
+        while ancestor is not None:
+            if ancestor.applied_modifications:
+                lineage_mods = ancestor.applied_modifications + lineage_mods
+            ancestor = ancestor.parent
+
         success, improved_files, reasoning = self.solution_improver.propose_improvements(
             problem_description=self.problem_description,
             current_solution=parent.solution.get_all_files(),
             current_metric=parent.metric_value,
             lesson_pool=self.lesson_pool,
+            metric_name=self.metric_name,
+            lower_is_better=self.lower_is_better,
+            data_schema=self.data_schema,
+            applied_modifications=lineage_mods,
         )
 
         if not success:
@@ -393,6 +718,10 @@ class MARSOrchestrator:
             module_descriptions=parent.solution.module_descriptions.copy(),
         )
 
+        # Record this improvement in the node's modification history
+        if reasoning:
+            node.applied_modifications = lineage_mods + [reasoning[:200]]
+
         self.log(f"Solution improved: modified {len(improved_files)} files")
         return True
 
@@ -400,14 +729,16 @@ class MARSOrchestrator:
     # Internal Debugging (inline, not a separate MCTS action)
     # ==================================================================
 
-    def _debug_solution_inline(self, node: TreeNode) -> bool:
+    def _debug_solution_inline(
+        self, node: TreeNode, attempt: int = 1, max_attempts: int = 10
+    ) -> bool:
         """
         Debug a buggy node **in-place** (Algorithm 2, lines 27-30).
 
-        Uses multiple strategies to fix errors:
-        1. Diff-based fix via DebugAgent (with fallbacks)
-        2. Direct file regeneration for the error file
-        3. Environment-specific fixes (emojis, parquet, etc.)
+        Uses PROGRESSIVE strategies based on attempt number:
+        - Attempts 1-3  : Targeted diff-based fix (minimal change)
+        - Attempts 4-6  : Direct file regeneration (structural rewrite)
+        - Attempts 7+   : Full solution regeneration from scratch
 
         Modifies node.solution directly so the next execution uses the fix.
         Returns True if a fix was generated, False otherwise.
@@ -418,69 +749,369 @@ class MARSOrchestrator:
         error_output = node.execution_result.stderr or node.execution_result.error_message
         all_files = node.solution.get_all_files()
 
-        # ══════════════════════════════════════════════════════════════
-        # Strategy 1: Standard debug flow (diff-based with fallbacks)
-        # ══════════════════════════════════════════════════════════════
-        error_analysis = self.debug_agent.analyze_error(
-            self.problem_description,
-            all_files,
-            error_output,
-            self.lesson_pool,
-        )
-
-        if error_analysis:
-            fixed_files = self.debug_agent.fix_error(
-                self.problem_description,
-                all_files,
-                error_output,
-                error_analysis,
-                self.lesson_pool,
+        # Build context from previous debug attempts so the model avoids
+        # repeating the same failing approaches (multi-turn context)
+        prev_context = ""
+        if node.debug_history:
+            prev_context = "\n".join(
+                f"Attempt {i + 1}: {entry}"
+                for i, entry in enumerate(node.debug_history)
             )
-            if fixed_files:
-                self._apply_fixes(node, fixed_files)
-                return True
 
         # ══════════════════════════════════════════════════════════════
-        # Strategy 2: Direct regeneration of error file
-        # ══════════════════════════════════════════════════════════════
-        target_file = self._extract_error_file(error_output)
-        if target_file and target_file in all_files:
-            self.log(f"Strategy 2: Regenerating {target_file} directly")
-            regenerated = self.debug_agent.regenerate_file(
-                target_file=target_file,
-                original_code=all_files[target_file],
-                execution_error=error_output,
-                error_analysis=error_analysis or "Error analysis not available",
-            )
-            if regenerated:
-                self._apply_fixes(node, {target_file: regenerated})
-                return True
-
-        # ══════════════════════════════════════════════════════════════
-        # Strategy 3: Quick environment fixes (no LLM needed)
+        # Strategy 0 (always first): Quick environment fixes — no LLM
         # ══════════════════════════════════════════════════════════════
         if self._apply_environment_fixes(node, error_output):
-            self.log("Strategy 3: Applied environment fixes")
+            self.log("Strategy 0: Applied environment fixes (no LLM)")
             return True
 
-        self.log("All debug strategies failed")
+        error_analysis = None
+
+        # ══════════════════════════════════════════════════════════════
+        # Strategy 1 (attempts 1-4): Direct file regeneration (PRIMARY)
+        # More reliable than diffs for models that struggle with exact
+        # old_code matching. Identify the error file and regenerate it.
+        # ══════════════════════════════════════════════════════════════
+        if attempt <= 4:
+            target_file = self._extract_error_file(error_output)
+            if not target_file:
+                target_file = "main.py"
+            if target_file and target_file in all_files:
+                self.log(f"Strategy 1 (attempt {attempt}): Regenerating {target_file}")
+                error_analysis = self.debug_agent.analyze_error(
+                    self.problem_description, all_files, error_output,
+                    self.lesson_pool, previous_attempts=prev_context,
+                    eda_report=self.eda_report, data_schema=self.data_schema,
+                    metric_name=self.metric_name,
+                )
+                regenerated = self.debug_agent.regenerate_file(
+                    target_file=target_file,
+                    original_code=all_files[target_file],
+                    execution_error=error_output,
+                    error_analysis=error_analysis or "No analysis available",
+                )
+                if regenerated:
+                    self._apply_fixes(node, {target_file: regenerated})
+                    node.debug_history.append(
+                        f"Attempt {attempt}: regenerated {target_file} OK | Error: {error_output[:100].strip()}"
+                    )
+                    return True
+                node.debug_history.append(
+                    f"Attempt {attempt}: regenerate {target_file} FAILED | Error: {error_output[:100].strip()}"
+                )
+
+        # ══════════════════════════════════════════════════════════════
+        # Strategy 2 (attempts 5-7): Targeted diff-based fix (FALLBACK)
+        # Used when file regeneration fails — attempts minimal targeted
+        # edits using XML diff format.
+        # ══════════════════════════════════════════════════════════════
+        if 5 <= attempt <= 7:
+            self.log(f"Strategy 2 (attempt {attempt}): Diff-based fix")
+            if error_analysis is None:
+                error_analysis = self.debug_agent.analyze_error(
+                    self.problem_description, all_files, error_output,
+                    self.lesson_pool, previous_attempts=prev_context,
+                    eda_report=self.eda_report, data_schema=self.data_schema,
+                    metric_name=self.metric_name,
+                )
+            if error_analysis:
+                fixed_files = self.debug_agent.fix_error(
+                    self.problem_description,
+                    all_files,
+                    error_output,
+                    error_analysis,
+                    self.lesson_pool,
+                    previous_attempts=prev_context,
+                    eda_report=self.eda_report,
+                    data_schema=self.data_schema,
+                    metric_name=self.metric_name,
+                )
+                if fixed_files:
+                    self._apply_fixes(node, fixed_files)
+                    node.debug_history.append(
+                        f"Attempt {attempt}: diff-fix OK | Error: {error_output[:100].strip()}"
+                    )
+                    return True
+                node.debug_history.append(
+                    f"Attempt {attempt}: diff-fix FAILED | Error: {error_output[:100].strip()}"
+                )
+
+        # ══════════════════════════════════════════════════════════════
+        # Strategy 3 (attempts 8+): Full solution redraft from scratch
+        # ══════════════════════════════════════════════════════════════
+        if attempt >= 8 and node.solution:
+            self.log(f"Strategy 3 (attempt {attempt}): Full solution redraft")
+            if self._draft_solution(node):
+                node.debug_history.append(
+                    f"Attempt {attempt}: full redraft OK"
+                )
+                return True
+            node.debug_history.append(f"Attempt {attempt}: full redraft FAILED")
+
+        self.log(f"All debug strategies failed at attempt {attempt}")
         return False
 
     def _apply_fixes(self, node: TreeNode, fixed_files: Dict[str, str]):
-        """Apply fixes to a node's solution in-place."""
+        """Apply fixes to a node's solution in-place.
+
+        If any module (non-main) was regenerated AND main.py was NOT explicitly
+        fixed by the LLM, refreshes main.py to sync with updated function
+        signatures — avoiding stale API calls.
+
+        If the LLM fixed main.py directly, we trust that fix and do NOT
+        overwrite it with a regenerated version.
+        """
+        modules_changed = []
+        main_explicitly_fixed = False
+
+        # First pass: detect what the LLM actually changed
+        original_files = node.solution.get_all_files()
         for filename, code in fixed_files.items():
+            original_code = original_files.get(filename, "")
             if filename == "main.py":
+                if code != original_code:
+                    main_explicitly_fixed = True
                 node.solution.main_script = code
             else:
+                if code != original_code:
+                    modules_changed.append(filename)
                 node.solution.modules[filename] = code
+
         self.log(f"Applied fix to {len(fixed_files)} files")
+
+        # If a module changed but main.py was NOT explicitly fixed, regenerate
+        # main.py so it stays in sync with updated module APIs.
+        # If main.py WAS explicitly fixed, trust the LLM's version.
+        if modules_changed and not main_explicitly_fixed:
+            self.log(
+                f"  Modules changed: {modules_changed} — regenerating main.py "
+                f"to sync with updated APIs"
+            )
+            self._refresh_main_script(node)
+        elif modules_changed and main_explicitly_fixed:
+            self.log(
+                f"  Modules changed: {modules_changed} but main.py was explicitly "
+                f"fixed by LLM — skipping regeneration to preserve fix"
+            )
+
+    def _validate_metric_bounds(self, node: TreeNode):
+        """
+        Reject metric values that are physically impossible for the metric type.
+
+        Uses the metric name to infer expected bounds and flags outliers.
+        """
+        metric = node.metric_value
+        name = (self.metric_name or "").lower()
+
+        # Metrics that must be in [0, 1]
+        bounded_01 = ("auc", "roc", "accuracy", "acc", "f1", "precision",
+                      "recall", "r2", "iou", "jaccard", "dice", "kappa",
+                      "mcc", "map", "ndcg")
+        # Metrics that must be >= 0
+        non_negative = ("mae", "mse", "rmse", "loss", "error", "logloss",
+                        "cross_entropy", "bce", "ce")
+
+        if any(k in name for k in bounded_01):
+            if not (0.0 <= metric <= 1.0):
+                self.log(
+                    f"  [Bounds] Metric {self.metric_name}={metric:.4f} out of [0,1] — "
+                    f"likely a bug (data leakage or wrong scale). Invalidating."
+                )
+                node.execution_result.validation_metric_valid = False
+                node.status = NodeStatus.BUGGY
+                node.metric_value = None
+                return
+            # Suspiciously perfect score warning
+            if metric > 0.995:
+                self.log(
+                    f"  [Bounds] WARNING: {self.metric_name}={metric:.4f} is suspiciously high "
+                    f"— possible data leakage."
+                )
+
+        elif any(k in name for k in non_negative):
+            if metric < 0:
+                self.log(
+                    f"  [Bounds] Metric {self.metric_name}={metric:.4f} is negative — "
+                    f"impossible for a loss metric. Invalidating."
+                )
+                node.execution_result.validation_metric_valid = False
+                node.status = NodeStatus.BUGGY
+                node.metric_value = None
+
+    def _classify_test_failure(self, test_result) -> str:
+        """
+        Classify a module test failure into one of:
+        - 'timeout'    : process was killed by time limit
+        - 'import'     : missing module / import error
+        - 'syntax'     : syntax / indentation error
+        - 'logic'      : assertion / runtime error (fixable by debug)
+        """
+        error_text = (test_result.error_message or "") + (test_result.stderr or "")
+        if "timeout" in error_text.lower() or not test_result.stderr:
+            if test_result.execution_time >= 110:  # close to 120s limit
+                return "timeout"
+        if any(k in error_text for k in ("ModuleNotFoundError", "ImportError", "No module named")):
+            return "import"
+        if any(k in error_text for k in ("SyntaxError", "IndentationError", "TabError")):
+            return "syntax"
+        return "logic"
+
+    def _refresh_main_script(self, node: TreeNode):
+        """
+        Regenerate main.py using the current (post-debug) module state.
+
+        Called after a module is changed during inline debugging to keep
+        main.py in sync with the updated function signatures.
+        Skips silently if the solution or idea is not available.
+        """
+        if not node.solution:
+            return
+        try:
+            new_main = self.coding_agent.implement_main_script(
+                self.problem_description,
+                node.solution.idea,
+                node.solution.modules,
+                self.lesson_pool,
+                eda_report=self.eda_report,
+                metric_name=self.metric_name,
+                data_schema=self.data_schema,
+            )
+            if new_main:
+                node.solution.main_script = new_main
+                self.log("  main.py regenerated with updated module signatures")
+            else:
+                self.log("  main.py regeneration returned None — keeping existing")
+        except Exception as e:
+            self.log(f"  main.py regeneration failed ({e}) — keeping existing")
 
     def _extract_error_file(self, error: str) -> Optional[str]:
         """Extract the filename that caused the error from traceback."""
-        import re
         matches = re.findall(r'File\s+"[^"]*[\\/](\w+\.py)"', error)
         if matches:
             return matches[-1]  # Last match = deepest in call stack
+        return None
+
+    def _validate_cross_module_imports(
+        self,
+        filename: str,
+        code: str,
+        existing_modules: Dict[str, str],
+    ) -> List[str]:
+        """
+        Check that imports from sibling modules reference names that actually exist.
+
+        For example, if module B does `from feature_eng import FeatureEngineer`
+        but feature_eng.py doesn't define FeatureEngineer, this returns an error
+        before the buggy code enters the solution — avoiding a runtime NameError.
+
+        Returns list of issue strings (empty = all OK).
+        """
+        issues = []
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return []  # Syntax errors already handled by CodingAgent
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            module_ref = node.module or ""
+            sibling_file = f"{module_ref}.py"
+            if sibling_file not in existing_modules:
+                continue  # External library — not our problem
+
+            sibling_code = existing_modules[sibling_file]
+            # Build set of names exported by the sibling
+            try:
+                sibling_tree = ast.parse(sibling_code)
+            except SyntaxError:
+                continue
+
+            exported_names = set()
+            for snode in ast.walk(sibling_tree):
+                if isinstance(snode, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    exported_names.add(snode.name)
+                elif isinstance(snode, ast.Assign):
+                    for target in snode.targets:
+                        if isinstance(target, ast.Name):
+                            exported_names.add(target.id)
+                elif isinstance(snode, ast.AnnAssign) and isinstance(snode.target, ast.Name):
+                    exported_names.add(snode.target.id)
+
+            for alias in node.names:
+                name = alias.name
+                if name == "*":
+                    continue
+                if name not in exported_names:
+                    issues.append(
+                        f"'{name}' not found in {sibling_file} "
+                        f"(available: {sorted(exported_names)[:8]})"
+                    )
+        return issues
+
+    def _fix_cross_module_imports(
+        self,
+        filename: str,
+        code: str,
+        issues: List[str],
+        existing_modules: Dict[str, str],
+        idea: str,
+        module_desc: str,
+    ) -> Optional[str]:
+        """
+        Ask the CodingAgent to regenerate a module whose cross-module imports
+        don't resolve, providing the actual API of the dependency.
+        """
+        issues_text = "\n".join(f"  - {i}" for i in issues)
+        # Build a compact API summary of all sibling modules
+        api_summary = []
+        for sib_file, sib_code in existing_modules.items():
+            try:
+                tree = ast.parse(sib_code)
+            except SyntaxError:
+                continue
+            names = []
+            for n in ast.walk(tree):
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    names.append(n.name)
+            if names:
+                api_summary.append(f"{sib_file}: {', '.join(names)}")
+
+        fix_prompt = f"""The module {filename} has import errors — it tries to import names that
+don't exist in the sibling modules. Fix the imports to use the ACTUAL exported names.
+
+IMPORT ISSUES:
+{issues_text}
+
+ACTUAL API OF SIBLING MODULES:
+{chr(10).join(api_summary)}
+
+CURRENT CODE OF {filename}:
+```python
+{code}
+```
+
+MODULE PURPOSE: {module_desc}
+
+Rules:
+1. Fix ONLY the broken import statements and any code that uses the wrong names
+2. Do NOT add new functionality
+3. Output the COMPLETE fixed file in a ```python block
+4. ASCII only, no emojis
+"""
+        self.log(f"  Attempting cross-module import fix for {filename}")
+        response = self.coding_agent.call_llm(
+            user_message=fix_prompt,
+            temperature=0,
+            max_tokens=8192,
+        )
+        fixed = self.coding_agent._extract_code_from_response(response["content"])
+        if fixed:
+            is_valid, _ = self.coding_agent.parser.validate_syntax(fixed)
+            if is_valid:
+                self.log(f"  Cross-module import fix applied to {filename}")
+                return fixed
+        self.log(f"  Cross-module import fix failed for {filename}")
         return None
 
     def _apply_environment_fixes(self, node: TreeNode, error: str) -> bool:
@@ -575,6 +1206,8 @@ class MARSOrchestrator:
                 filename,
                 code,
                 implemented_modules,
+                data_schema=self.data_schema,
+                eda_report=self.eda_report,
             )
 
             if not test_code:
@@ -608,38 +1241,95 @@ class MARSOrchestrator:
                 self.log(f"  Module {module_name} passed tests")
                 tested_modules[filename] = code
             else:
-                self.log(f"  Module {module_name} failed tests, attempting fix")
-                # One debug attempt for module
+                # ── Classify failure type before debugging ────────────
+                failure_type = self._classify_test_failure(test_result)
+                self.log(f"  Module {module_name} failed tests [{failure_type}], attempting fix")
+
+                if failure_type == "timeout":
+                    self.log(
+                        f"  Module {module_name} timed out — keeping as-is "
+                        f"(likely heavy computation; will tune at runtime)"
+                    )
+                    tested_modules[filename] = code
+                    continue
+
+                error_text = test_result.stderr or test_result.error_message or ""
                 fixed_code = self._debug_module(
-                    idea, filename, code, test_result.stderr, modules_desc.get(module_name, "")
+                    idea, filename, code, error_text,
+                    modules_desc.get(module_name, ""),
+                    all_modules=implemented_modules,
                 )
-                tested_modules[filename] = fixed_code if fixed_code else code
+                if fixed_code:
+                    self.log(f"  Module {module_name} fixed successfully")
+                    tested_modules[filename] = fixed_code
+                else:
+                    self.log(
+                        f"  WARNING: Module {module_name} fix failed — "
+                        f"using original code (known broken). "
+                        f"Error: {error_text[:200].strip()}"
+                    )
+                    tested_modules[filename] = code
 
         return tested_modules
 
     def _debug_module(
-        self, idea: str, filename: str, code: str, error: str, description: str
+        self,
+        idea: str,
+        filename: str,
+        code: str,
+        error: str,
+        description: str,
+        all_modules: Optional[Dict[str, str]] = None,
     ) -> Optional[str]:
-        """Attempt to fix a single module that failed unit testing."""
+        """Attempt to fix a single module that failed unit testing.
+
+        Passes ALL sibling modules as context so the debug agent can verify
+        that function calls match the actual signatures of dependencies.
+        """
+        # Include all sibling modules so the agent sees the full API surface
+        context_files = dict(all_modules) if all_modules else {}
+        context_files[filename] = code  # Ensure the failing module is included
+
         error_analysis = self.debug_agent.analyze_error(
             self.problem_description,
-            {filename: code},
+            context_files,
             error,
             self.lesson_pool,
+            eda_report=self.eda_report,
+            data_schema=self.data_schema,
+            metric_name=self.metric_name,
         )
         if not error_analysis:
             return None
 
         fixed_files = self.debug_agent.fix_error(
             self.problem_description,
-            {filename: code},
+            context_files,
             error,
             error_analysis,
             self.lesson_pool,
+            eda_report=self.eda_report,
+            data_schema=self.data_schema,
+            metric_name=self.metric_name,
         )
-        if fixed_files and filename in fixed_files:
-            return fixed_files[filename]
-        return None
+
+        fixed_code = fixed_files.get(filename) if fixed_files else None
+
+        # Extract a debug lesson regardless of whether the fix succeeded.
+        # This teaches the system about module-level error patterns.
+        try:
+            self.lesson_extractor.extract_module_debug_lesson(
+                module_name=filename,
+                original_code=code,
+                fixed_code=fixed_code,
+                error=error,
+                error_analysis=error_analysis,
+                fixed=bool(fixed_code),
+            )
+        except Exception as e:
+            self.log(f"Module debug lesson extraction failed (non-blocking): {e}")
+
+        return fixed_code
 
     def _data_env_vars(self) -> Dict[str, str]:
         """Return env vars that point generated code to the original data paths."""
@@ -721,6 +1411,8 @@ class MARSOrchestrator:
                 code=node.solution.main_script,
                 execution_output=node.execution_result.stdout,
                 execution_error=node.execution_result.stderr,
+                metric_name=self.metric_name,
+                lower_is_better=self.lower_is_better,
             )
 
             if review:
@@ -740,6 +1432,10 @@ class MARSOrchestrator:
                 if reviewed_metric is not None and review.get("valid_metric", False):
                     node.metric_value = float(reviewed_metric)
                     node.execution_result.metric_value = float(reviewed_metric)
+
+                # Heuristic bounds validation
+                if node.metric_value is not None:
+                    self._validate_metric_bounds(node)
 
                 self.log(f"Review summary: {review_summary[:120]}")
         except Exception as e:
@@ -820,6 +1516,54 @@ class MARSOrchestrator:
             )
         except Exception as e:
             self.log(f"Solution lesson extraction failed: {e}")
+
+    # ==================================================================
+    # EDA Augmentation
+    # ==================================================================
+
+    def _augment_eda_if_needed(self):
+        """
+        Enrich the shared EDA report with insights extracted from solution
+        lessons every _eda_refresh_interval iterations.
+
+        The raw EDA (statistics) never changes because the CSV doesn't change,
+        but accumulated lessons reveal what data characteristics matter most.
+        Appending them here means every downstream agent (IdeaAgent, CodingAgent,
+        DebugAgent) automatically benefits from this growing knowledge.
+        """
+        if self.iterations - self._last_eda_refresh < self._eda_refresh_interval:
+            return
+
+        solution_lessons = self.lesson_pool.get_recent_lessons(
+            LessonType.SOLUTION, k=5
+        )
+        if not solution_lessons:
+            return
+
+        insights = []
+        for lesson in solution_lessons:
+            if hasattr(lesson, "key_lesson") and lesson.key_lesson:
+                insights.append(f"- {lesson.key_lesson.strip()}")
+
+        if not insights:
+            return
+
+        # Use a unique sentinel that cannot appear in normal EDA output
+        marker = "\n\n## [MARS_AUGMENT] Insights from Accumulated Solutions"
+        augmentation = (
+            marker + "\n"
+            + "\n".join(insights)
+        )
+
+        # Replace previous augmentation section (if any) to avoid duplication
+        base = self.eda_report.split(marker)[0]
+        self.eda_report = base + augmentation
+
+        self._last_eda_refresh = self.iterations
+        self.log(
+            f"EDA augmented with {len(insights)} lesson insight(s) "
+            f"(iteration {self.iterations})"
+        )
 
     # ==================================================================
     # Persistence

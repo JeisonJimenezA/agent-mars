@@ -2,6 +2,9 @@
 The following Python files are already provided. Do not modify them.
 {library_files}
 
+==== Data Schema (CRITICAL - use these EXACT column names in mock data) ====
+{data_schema}
+
 ==== Task ====
 Write a ROBUST unit test script that validates the provided Python modules.
 
@@ -14,8 +17,11 @@ Write a ROBUST unit test script that validates the provided Python modules.
 - **UTF-8 ENCODING**: Use `encoding='utf-8'` when opening files.
 
 ## 2. Test Data
-- **CREATE MINIMAL INLINE DATA**: Generate small test data directly in the script.
-  Do NOT depend on external files that may not exist.
+- **USE REAL COLUMN NAMES**: The Data Schema above shows the EXACT column names,
+  dtypes, and sample values from the real dataset. Your mock DataFrames MUST use
+  these same column names so modules don't crash on missing/wrong columns.
+- **CREATE MINIMAL INLINE DATA**: Generate small test data (10-50 rows) directly
+  in the script using the column names from the schema above.
 - **HANDLE MISSING FILES**: Wrap file operations in try/except. If files are
   missing, create mock data or skip that test gracefully.
 - **SMALL DATA ONLY**: Use 10-100 rows maximum for test DataFrames.

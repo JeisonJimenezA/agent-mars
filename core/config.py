@@ -18,7 +18,11 @@ class Config:
     OPENROUTER_BASE_URL: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat-v3-0324")
 
-    MAX_TOKENS: int = int(os.getenv("MAX_TOKENS", "16000"))
+    # MAX_TOKENS controls LLM output size. If models produce truncated/incomplete
+    # code (unclosed blocks, "..." placeholders), increase this value.
+    # Recommended minimums: deepseek=16000, claude-3.5=8192, gpt-4o=16384
+    # For complex ML solutions with large modules, use 24000-32000.
+    MAX_TOKENS: int = int(os.getenv("MAX_TOKENS", "65000"))
     TEMPERATURE: float = 0.7
     TOP_P: float = 0.95
 
@@ -117,7 +121,7 @@ class Config:
     @classmethod
     def save_to_file(cls, filepath: Path):
         """Save config to JSON file"""
-        with open(filepath, 'w') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(cls.to_dict(), f, indent=2)
 
 

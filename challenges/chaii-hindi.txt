@@ -28,8 +28,8 @@ CONTEXT AND MOTIVATION:
 DATASET:
 Files:
 - train.csv          : Training examples with context, questions, and answers
-- test.csv           : Test examples with context and questions (no answers)
-- sample_submission.csv : Correct submission format
+- test.csv           : Test examples with context and questions (no answers) — ALL test rows are here, use ALL of them for predictions
+- sample_submission.csv : Output format template only (DO NOT use as test data or to filter test.csv — it only contains a few sample IDs)
 
 All files must be encoded as UTF-8 (critical for Hindi/Tamil script handling)
 

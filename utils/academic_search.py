@@ -3,12 +3,13 @@
 Real academic search across Semantic Scholar, ArXiv, and Papers With Code.
 All APIs are free and require no API key.
 
-Includes persistent caching to avoid redundant API calls.
+Includes persistent caching and parallel search to minimize latency.
 """
 import time
 import re
 import json
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Dict, Optional
 from urllib.parse import quote_plus
@@ -251,6 +252,50 @@ def search_arxiv(query: str, limit: int = 5) -> List[Dict]:
     return results
 
 
+# ── Papers With Code SOTA ─────────────────────────────────────────
+
+def search_papers_with_code_sota(query: str, limit: int = 5) -> List[Dict]:
+    """
+    Search Papers With Code /api/v1/tasks/ for direct SOTA benchmarks.
+    Returns leaderboard/benchmark results for tasks matching the query.
+    """
+    url = (
+        f"https://paperswithcode.com/api/v1/tasks/"
+        f"?q={quote_plus(query)}"
+        f"&page=1&items_per_page={limit}"
+    )
+    resp = _safe_get(url, timeout=15)
+    if resp is None:
+        return []
+
+    try:
+        data = resp.json()
+    except Exception:
+        return []
+
+    results = []
+    for task in data.get("results", []):
+        task_name = task.get("name", "")
+        description = task.get("description", "") or ""
+        task_url = task.get("url", "")
+
+        # Normalize URL
+        if task_url and not task_url.startswith("http"):
+            task_url = f"https://paperswithcode.com{task_url}"
+
+        results.append({
+            "title": f"SOTA Task: {task_name}",
+            "snippet": description[:500] if description else f"State-of-the-art benchmark for {task_name}",
+            "model_name": "",
+            "source": "pwc_sota",
+            "url": task_url,
+            "year": None,
+            "citations": 0,
+        })
+
+    return results
+
+
 # ── Papers With Code ──────────────────────────────────────────────
 
 def search_papers_with_code(query: str, limit: int = 5) -> List[Dict]:
@@ -306,10 +351,11 @@ def search_all_academic_sources(
     use_cache: bool = True,
 ) -> List[Dict]:
     """
-    Search all 3 academic sources and deduplicate by normalized title.
+    Search all 4 academic sources in parallel and deduplicate by normalized title.
     Returns unified, deduplicated list sorted by citation count (desc).
 
     Uses persistent cache to avoid redundant API calls.
+    Sources: Semantic Scholar, ArXiv, Papers With Code (papers + SOTA tasks).
     """
     # Check cache first
     if use_cache:
@@ -319,15 +365,28 @@ def search_all_academic_sources(
             return cached
 
     all_results: List[Dict] = []
+    search_fns = [
+        search_semantic_scholar,
+        search_arxiv,
+        search_papers_with_code,
+        search_papers_with_code_sota,
+    ]
 
-    # Query each source (rate-limited internally)
-    for search_fn in (search_semantic_scholar, search_arxiv, search_papers_with_code):
-        try:
-            results = search_fn(query, limit=limit_per_source)
-            all_results.extend(results)
-        except Exception as e:
-            print(f"  [AcademicSearch] Source failed: {e}")
-            continue
+    # Run all sources in parallel
+    with ThreadPoolExecutor(max_workers=len(search_fns)) as executor:
+        future_to_fn = {
+            executor.submit(fn, query, limit_per_source): fn.__name__
+            for fn in search_fns
+        }
+        for future in as_completed(future_to_fn):
+            fn_name = future_to_fn[future]
+            try:
+                results = future.result()
+                if results:
+                    all_results.extend(results)
+                    print(f"  [AcademicSearch] {fn_name}: {len(results)} results")
+            except Exception as e:
+                print(f"  [AcademicSearch] {fn_name} failed: {e}")
 
     # Deduplicate by normalized title
     seen_titles = set()

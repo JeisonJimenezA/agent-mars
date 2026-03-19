@@ -8,11 +8,27 @@ from pathlib import Path
 import argparse
 import json
 
+import pandas as pd
 from core.config import Config
 from core.challenge_loader import ChallengeLoader
 from mle.eda_agent import EDAAgent
 from orchestrator import MARSOrchestrator
 from utils.hardware_info import get_hardware_context
+
+
+def build_data_schema(df: pd.DataFrame, n_samples: int = 3) -> str:
+    """Build a compact schema string: column names, types, null counts, sample values."""
+    lines = [f"Rows: {len(df):,}  |  Columns: {len(df.columns)}"]
+    lines.append("")
+    lines.append(f"{'Column':<30} {'Dtype':<12} {'Nulls':>6}  Sample values")
+    lines.append("-" * 80)
+    for col in df.columns:
+        dtype = str(df[col].dtype)
+        nulls = int(df[col].isnull().sum())
+        samples = df[col].dropna().head(n_samples).tolist()
+        samples_str = ", ".join(repr(v) for v in samples)
+        lines.append(f"{col:<30} {dtype:<12} {nulls:>6}  {samples_str}")
+    return "\n".join(lines)
 
 def main():
     parser = argparse.ArgumentParser(description="MARS - Unified Challenge Runner")
@@ -94,11 +110,15 @@ def main():
     
     # Load data
     data = loader.load_data()
-    
+
     if 'train' not in data:
         print("✗ Error: Training data not found")
         return
-    
+
+    # Build data schema for LLM context
+    data_schema = build_data_schema(data['train'])
+    print(f"\nData Schema:\n{data_schema}\n")
+
     # Prepare splits
     metadata_dir = output_dir / "metadata"
     splits = loader.prepare_splits(
@@ -106,7 +126,7 @@ def main():
         metadata_dir=metadata_dir,
         validation_ratio=0.2
     )
-    
+
     if 'test' in data:
         print(f"  ✓ Test: {len(data['test'])} samples (from {data_dir})")
     
@@ -126,7 +146,7 @@ def main():
     
     # Save EDA
     eda_path = metadata_dir / "eda_report.md"
-    with open(eda_path, 'w') as f:
+    with open(eda_path, 'w', encoding='utf-8') as f:
         f.write(eda_report)
     print(f"  ✓ EDA saved: {eda_path}")
     
@@ -146,7 +166,7 @@ def main():
     # Initialize orchestrator with ONLY problem description
     # NO model suggestions - agent figures everything out
     orchestrator = MARSOrchestrator(
-        problem_description=problem_description,  # ← ONLY CONTEXT
+        problem_description=problem_description,
         eda_report=eda_report,
         metadata_dir=metadata_dir,
         data_dir=data_dir,
@@ -154,6 +174,7 @@ def main():
         working_dir=output_dir,
         lower_is_better=lower_is_better,
         metric_name=metric_name,
+        data_schema=data_schema,
     )
     
     # Run search
@@ -173,7 +194,7 @@ def main():
         
         for filename, code in best_node.solution.get_all_files().items():
             filepath = best_dir / filename
-            with open(filepath, 'w') as f:
+            with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(code)
             print(f"  ✓ Saved: {filename}")
         
@@ -192,7 +213,7 @@ def main():
         }
         
         info_path = best_dir / "solution_info.json"
-        with open(info_path, 'w') as f:
+        with open(info_path, 'w', encoding='utf-8') as f:
             json.dump(info, f, indent=2)
         
         print(f"\n{'='*70}")

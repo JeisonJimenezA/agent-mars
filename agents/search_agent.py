@@ -224,7 +224,7 @@ Respond in JSON format:
         domain = task_info.get("domain", "machine learning")
         task_type = task_info.get("task_type", "classification")
 
-        prompt = f"""Generate 5 highly specific academic search queries for finding state-of-the-art ML models to solve this challenge.
+        prompt = f"""Generate 7 highly specific academic search queries for finding state-of-the-art ML models to solve this challenge.
 
 PROBLEM CONTEXT:
 - Challenge Name: {pk.get('challenge_name', 'unknown')}
@@ -238,7 +238,7 @@ PROBLEM CONTEXT:
 - Key Challenges: {pk.get('key_challenges', 'none')}
 
 SEARCH TARGETS:
-The queries will search Semantic Scholar, ArXiv, and Papers With Code.
+The queries will search Semantic Scholar, ArXiv, Papers With Code (papers + SOTA benchmarks).
 
 REQUIREMENTS:
 1. Each query should be 4-8 words, optimized for academic paper search
@@ -249,12 +249,14 @@ REQUIREMENTS:
    - The specific data challenges mentioned (e.g., "high cardinality categorical embedding")
    - State-of-the-art models for this exact domain
    - Efficient/practical models for this task type
+   - Ensemble or boosting methods for this domain
+   - Recent benchmark results or survey papers
 4. DO NOT use generic queries like "machine learning classification" or "deep learning model"
 5. Each query should target different aspects of the problem
 
-Respond with a JSON array of exactly 5 query strings:
+Respond with a JSON array of exactly 7 query strings:
 ```json
-["query 1", "query 2", "query 3", "query 4", "query 5"]
+["query 1", "query 2", "query 3", "query 4", "query 5", "query 6", "query 7"]
 ```
 """
 
@@ -269,9 +271,9 @@ Respond with a JSON array of exactly 5 query strings:
 
         if queries and len(queries) >= 3:
             self.log(f"  LLM generated {len(queries)} targeted queries")
-            for i, q in enumerate(queries[:5], 1):
+            for i, q in enumerate(queries[:7], 1):
                 self.log(f"    {i}. {q}")
-            return queries[:5]
+            return queries[:7]
         else:
             # Fallback to template-based queries if LLM fails
             self.log("  LLM query generation failed, using fallback")
@@ -348,7 +350,13 @@ Respond with a JSON array of exactly 5 query strings:
         # Efficient models
         queries.append(f"efficient {domain} model fast inference")
 
-        return queries[:5]
+        # Ensemble/boosting
+        queries.append(f"gradient boosting ensemble {task_type} benchmark")
+
+        # Survey or benchmark
+        queries.append(f"survey {domain} {task_type} methods comparison")
+
+        return queries[:7]
     
     def _perform_searches(self, queries: List[str]) -> List[Dict]:
         """
@@ -361,10 +369,10 @@ Respond with a JSON array of exactly 5 query strings:
         for query in queries:
             self.log(f"  Searching: {query[:50]}...")
             try:
-                # Real academic search (rate-limited internally)
+                # Real academic search (parallel, rate-limited internally)
                 academic_results = search_all_academic_sources(
                     query=query,
-                    limit_per_source=3,
+                    limit_per_source=5,
                 )
                 if academic_results:
                     self.log(f"    Found {len(academic_results)} papers")
@@ -457,8 +465,8 @@ Respond with a JSON array of exactly 5 query strings:
         Uses LLM to synthesize information and propose candidates,
         now with problem-specific context for better relevance.
         """
-        # Format search results
-        results_text = self._format_search_results(search_results)
+        # Format search results (top 15, sorted by citations already)
+        results_text = self._format_search_results(search_results[:15])
 
         # Build problem context section
         pk = problem_keywords or {}
@@ -528,13 +536,34 @@ Respond in JSON format:
             )
     
     def _format_search_results(self, results: List[Dict]) -> str:
-        """Format search results for prompt"""
+        """Format search results for prompt, including year, citations, source, and URL."""
         formatted = []
-        for i, result in enumerate(results[:10], 1):  # Limit to 10 results
-            formatted.append(f"[{i}] {result.get('title', 'Unknown')}")
-            formatted.append(f"    {result.get('snippet', 'No description')}")
+        for i, result in enumerate(results[:15], 1):  # Up to 15 results
+            title = result.get("title", "Unknown")
+            snippet = result.get("snippet", "No description")
+            source = result.get("source", "")
+            year = result.get("year")
+            citations = result.get("citations", 0)
+            url = result.get("url", "")
+
+            meta_parts = []
+            if year:
+                meta_parts.append(str(year))
+            if citations:
+                meta_parts.append(f"{citations} citations")
+            if source:
+                meta_parts.append(source.replace("_", " "))
+
+            meta = f" [{', '.join(meta_parts)}]" if meta_parts else ""
+            formatted.append(f"[{i}] {title}{meta}")
+            if snippet:
+                # Truncate long snippets to keep prompt manageable
+                snippet_short = snippet[:300] + "..." if len(snippet) > 300 else snippet
+                formatted.append(f"    {snippet_short}")
+            if url:
+                formatted.append(f"    URL: {url}")
             formatted.append("")
-        
+
         return "\n".join(formatted)
     
     def _parse_model_candidates(self, response: str) -> List[Dict[str, str]]:

@@ -5,6 +5,8 @@ Supports any model available in Ollama (Qwen, Llama, Mistral, etc.)
 """
 
 import os
+import sys
+import json
 import time
 import requests
 from typing import Dict, List, Optional, Any
@@ -28,6 +30,25 @@ class OllamaClient:
 
         print(f"Using Ollama: {self.model_name} (max_tokens: {self.max_output_tokens})")
         print(f"Server: {self.base_url}")
+
+    # Known cloud-only model name prefixes (no local GGUF exists for these)
+    CLOUD_MODEL_PREFIXES = (
+        "gemini-",
+        "claude-",
+        "gpt-",
+        "o1-",
+        "o3-",
+        "o4-",
+    )
+
+    def _is_cloud_model(self) -> bool:
+        """
+        Detect cloud models that don't carry the explicit ':cloud' suffix.
+        Ollama cloud models backed by proprietary APIs (Gemini, Claude, GPT, etc.)
+        do not accept llama.cpp options like num_predict and will return 500.
+        """
+        base = self.model_name.split(":")[0].lower()
+        return any(base.startswith(prefix) for prefix in self.CLOUD_MODEL_PREFIXES)
 
     def _verify_server(self):
         """Verify Ollama server is running and model is available."""
@@ -60,38 +81,62 @@ class OllamaClient:
         except Exception as e:
             print(f"Warning: Could not verify Ollama server: {e}")
 
+    def _build_payload(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: Optional[float],
+        max_tokens: Optional[int],
+        stream: bool,
+    ) -> Dict[str, Any]:
+        """Build the request payload, handling cloud vs local model differences."""
+        is_cloud = self.model_name.endswith(":cloud") or (
+            ":" not in self.model_name and self._is_cloud_model()
+        )
+        payload: Dict[str, Any] = {
+            "model": self.model_name,
+            "messages": messages,
+            "stream": stream,
+        }
+        if not is_cloud:
+            effective_tokens = min(
+                max_tokens or self.max_output_tokens,
+                self.max_output_tokens,
+            )
+            payload["options"] = {
+                "num_predict": effective_tokens,
+                "temperature": temperature if temperature is not None else 0,
+            }
+        return payload
+
     def chat_completion(
         self,
         messages: List[Dict[str, str]],
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None
+        max_tokens: Optional[int] = None,
+        stream: bool = False,
     ) -> Dict[str, Any]:
         """
         Make a chat completion request to Ollama.
 
-        Args:
-            messages: List of message dicts with 'role' and 'content'
-            temperature: Sampling temperature (0.0-1.0)
-            max_tokens: Maximum output tokens
-
-        Returns:
-            Dict with 'content', 'total_tokens', etc.
+        When stream=True, tokens are printed to stdout as they arrive so the
+        user can see generation in real time. The full assembled response is
+        returned the same way as the blocking mode.
         """
-        # Build request payload
-        payload = {
-            "model": self.model_name,
-            "messages": messages,
-            "stream": False,
-            "options": {
-                "num_predict": max_tokens or self.max_output_tokens,
-                "temperature": temperature if temperature is not None else 0,
-            }
-        }
+        if stream:
+            return self._chat_completion_streaming(messages, temperature, max_tokens)
+        return self._chat_completion_blocking(messages, temperature, max_tokens)
 
-        # Make request with retry
-        # Longer timeout for large models like qwen3-coder:30b
-        timeout_seconds = 900  # 15 minutes for large model generations
-        retry_attempts = 3
+    def _chat_completion_blocking(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: Optional[float],
+        max_tokens: Optional[int],
+    ) -> Dict[str, Any]:
+        """Blocking (non-streaming) completion — waits for the full response."""
+        payload = self._build_payload(messages, temperature, max_tokens, stream=False)
+
+        timeout_seconds = 900
+        retry_attempts = 10
         retry_delay = 2
 
         for attempt in range(retry_attempts):
@@ -99,19 +144,14 @@ class OllamaClient:
                 response = requests.post(
                     f"{self.base_url}/api/chat",
                     json=payload,
-                    timeout=timeout_seconds
+                    timeout=timeout_seconds,
                 )
 
                 if response.status_code != 200:
-                    error_msg = response.text[:500]
-                    raise Exception(f"Ollama API error {response.status_code}: {error_msg}")
+                    raise Exception(f"Ollama API error {response.status_code}: {response.text[:500]}")
 
                 result = response.json()
-
-                # Extract content
                 content = result.get("message", {}).get("content", "")
-
-                # Get token counts if available
                 eval_count = result.get("eval_count", len(content) // 4)
                 prompt_eval_count = result.get("prompt_eval_count", 0)
                 total_tokens = eval_count + prompt_eval_count
@@ -125,7 +165,7 @@ class OllamaClient:
                     "input_tokens": prompt_eval_count,
                     "output_tokens": eval_count,
                     "model": result.get("model", self.model_name),
-                    "eval_duration": result.get("eval_duration", 0) / 1e9,  # Convert to seconds
+                    "eval_duration": result.get("eval_duration", 0) / 1e9,
                 }
 
             except requests.exceptions.Timeout:
@@ -148,6 +188,99 @@ class OllamaClient:
             except Exception as e:
                 if attempt < retry_attempts - 1:
                     print(f"Ollama request failed ({attempt + 1}/{retry_attempts}): {e}")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    raise
+
+    def _chat_completion_streaming(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: Optional[float],
+        max_tokens: Optional[int],
+    ) -> Dict[str, Any]:
+        """
+        Streaming completion — prints each token to stdout as it arrives.
+        Returns the same dict structure as the blocking version.
+        """
+        payload = self._build_payload(messages, temperature, max_tokens, stream=True)
+
+        timeout_seconds = 900
+        retry_attempts = 3
+        retry_delay = 2
+
+        for attempt in range(retry_attempts):
+            try:
+                response = requests.post(
+                    f"{self.base_url}/api/chat",
+                    json=payload,
+                    stream=True,
+                    timeout=timeout_seconds,
+                )
+
+                if response.status_code != 200:
+                    raise Exception(f"Ollama API error {response.status_code}: {response.text[:500]}")
+
+                chunks = []
+                eval_count = 0
+                prompt_eval_count = 0
+
+                print(f"\n[{self.model_name}] ", end="", flush=True)
+
+                for raw_line in response.iter_lines():
+                    if not raw_line:
+                        continue
+                    try:
+                        chunk = json.loads(raw_line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    token = chunk.get("message", {}).get("content", "")
+                    if token:
+                        sys.stdout.write(token)
+                        sys.stdout.flush()
+                        chunks.append(token)
+
+                    if chunk.get("done", False):
+                        eval_count = chunk.get("eval_count", 0)
+                        prompt_eval_count = chunk.get("prompt_eval_count", 0)
+                        break
+
+                # Newline after stream ends
+                print()
+
+                content = "".join(chunks)
+                total_tokens = eval_count + prompt_eval_count
+
+                self.total_requests += 1
+                self.total_tokens += total_tokens
+
+                return {
+                    "content": content,
+                    "total_tokens": total_tokens,
+                    "input_tokens": prompt_eval_count,
+                    "output_tokens": eval_count,
+                    "model": self.model_name,
+                    "eval_duration": 0,
+                }
+
+            except requests.exceptions.Timeout:
+                if attempt < retry_attempts - 1:
+                    print(f"\nOllama stream timed out, retrying ({attempt + 1}/{retry_attempts})...")
+                    time.sleep(retry_delay)
+                    continue
+                raise Exception("Ollama streaming timed out after multiple attempts")
+
+            except requests.exceptions.ConnectionError:
+                if attempt < retry_attempts - 1:
+                    print(f"\nConnection lost during stream, retrying ({attempt + 1}/{retry_attempts})...")
+                    time.sleep(retry_delay)
+                    continue
+                raise Exception(f"Cannot connect to Ollama at {self.base_url}")
+
+            except Exception as e:
+                if attempt < retry_attempts - 1:
+                    print(f"\nStream failed ({attempt + 1}/{retry_attempts}): {e}")
                     time.sleep(retry_delay)
                     retry_delay *= 2
                 else:

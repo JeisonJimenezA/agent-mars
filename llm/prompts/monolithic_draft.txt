@@ -1,0 +1,139 @@
+# SELF-CONTAINED ML SCRIPT (main.py)
+
+## CRITICAL RULES (READ FIRST - VIOLATIONS CAUSE CRASHES)
+
+### 1. Dataclass Mutable Defaults
+```python
+# WRONG: layers: List[int] = []
+# CORRECT: layers: List[int] = field(default_factory=list)
+```
+
+### 2. Environment Constraints
+- **NO EMOJIS**: ASCII only (Windows crashes on emoji)
+- **NO PARQUET**: Use `.to_csv()` only
+- **ENCODING**: Always use `encoding='utf-8'`
+
+### 3. API Compatibility
+- **LightGBM**: Use `callbacks=[lgb.early_stopping(100)]` not `early_stopping_rounds=`
+- **y_train**: Must be 1D integer array (0,1,2...), NOT one-hot, NOT probabilities
+- **XGBoost multiclass**: Use integer labels, not one-hot
+
+### 4. DATA LEAKAGE PREVENTION (MANDATORY)
+
+- **Fit preprocessing on train ONLY**: Scalers, encoders, imputers call `.fit()` on train.
+  Use `.transform()` on val and test.
+- **Do NOT re-merge train+val** after loading the pre-split files.
+- **No global statistics** from the combined dataset.
+- **Cross-validation**: apply ALL preprocessing INSIDE each fold.
+
+```python
+# CORRECT:
+scaler = StandardScaler().fit(X_train)
+X_train = scaler.transform(X_train)
+X_val   = scaler.transform(X_val)    # transform only
+X_test  = scaler.transform(X_test)   # transform only
+```
+
+### 5. Code Order
+```python
+# CORRECT: Load data first, then compute anything that depends on it
+X_train, y_train = load_data()
+class_weights = compute_weights(y=y_train)
+```
+
+---
+
+## OUTPUT FORMAT
+
+One complete self-contained Python file in a single ```python block:
+
+```python
+# main.py
+# All logic here — imports, helpers, training, evaluation, submission
+```
+
+The script must run with: `python main.py`
+
+---
+
+## REQUIRED OUTPUT
+
+The script MUST print exactly this line at the end:
+```
+Final Validation Metric: <numeric_value>
+```
+Without this line the solution is considered invalid.
+
+---
+
+## YOUR TASK
+
+Write a **single self-contained `main.py`** that implements the full ML pipeline:
+1. Load and preprocess data
+2. Train model
+3. Evaluate on validation set — print `Final Validation Metric: <value>`
+4. Generate predictions on test set
+5. Save predictions to `./submission/submission.csv`
+
+**Do NOT split into multiple files. All helper functions and classes go in this one file.**
+
+---
+
+## CONTEXT
+
+### Problem Description
+{problem_description}
+
+### Metric to Optimize
+**{metric_name}** — every design decision should target this metric.
+
+### Data Schema (columns, types, sample values)
+{data_schema}
+
+### EDA Report
+{eda_report}
+
+### Solution Approach
+{idea}
+
+### Lessons from Previous Runs (avoid repeating past mistakes)
+{lessons}
+
+### Execution Environment
+{hardware_context}
+
+### Data Locations
+
+The framework injects two environment variables at runtime:
+
+```python
+import os
+DATA_DIR     = os.environ.get('DATA_DIR', '.')
+METADATA_DIR = os.environ.get('METADATA_DIR', './metadata')
+```
+
+| Variable | File | Purpose |
+|----------|------|---------|
+| DATA_DIR | train.csv | Full original training set (has target column) |
+| DATA_DIR | test.csv | Test set — generate predictions for EVERY row |
+| DATA_DIR | sample_submission.csv | **FORMAT TEMPLATE ONLY** — never use as test data |
+| METADATA_DIR | train.csv | 80% training split (fit models here) |
+| METADATA_DIR | val.csv | 20% hold-out (evaluate metric here) |
+| (fixed) | ./submission/submission.csv | Save your predictions here |
+
+CRITICAL: `sample_submission.csv` is a format template. Never load it as the test set.
+
+---
+
+## IMPLEMENTATION REQUIREMENTS
+
+1. **Self-contained**: All classes and functions defined in this file — no imports from other local files
+2. **Runnable baseline**: Prioritize a working solution over a perfect one — you can optimize later
+3. **Print metric**: `print(f"Final Validation Metric: {{score:.6f}}")` at the end
+4. **Submission**: Create `./submission/` dir and save predictions matching sample_submission format
+5. **No placeholders**: Never use `...` or `pass` as function body — implement everything fully
+6. **No artificial length limit**: Write as many lines as needed. For deep learning this may be 1000+ lines — that is expected and correct
+
+---
+
+Now write the complete self-contained `main.py`:

@@ -1,6 +1,8 @@
 # agents/modular_agent.py
 from typing import Dict, Optional, List, Tuple
 from agents.base_agent import BaseAgent
+from memory.lesson_pool import LessonPool
+from memory.lesson_types import LessonType
 
 class ModularAgent(BaseAgent):
     """
@@ -17,27 +19,45 @@ class ModularAgent(BaseAgent):
     def decompose_idea(
         self,
         problem_description: str,
-        idea: str
+        idea: str,
+        eda_report: str = "",
+        lesson_pool: Optional[LessonPool] = None,
+        metric_name: str = "",
+        data_schema: str = "",
     ) -> Optional[Dict[str, str]]:
         """
         Decompose idea into logical modules.
-        
+
         Returns a dictionary of {module_name: module_description}
-        
+
         Args:
             problem_description: Task description
             idea: Natural language solution idea
-            
+            eda_report: EDA summary for data-aware decomposition
+            lesson_pool: Lessons from previous runs
+            metric_name: Metric being optimized
+            data_schema: Column names, types and sample values
+
         Returns:
             Dict of module names to descriptions
         """
         self.log("Decomposing idea into modules...")
-        
+
+        lessons_text = ""
+        if lesson_pool:
+            lessons_text = lesson_pool.format_for_prompt(
+                lesson_type=LessonType.SOLUTION, k=8
+            )
+
         # Get prompt
         prompt = self.prompt_manager.get_prompt(
             "modular_decomposition",
             problem_description=problem_description,
-            idea=idea
+            idea=idea,
+            eda_report=eda_report,
+            lessons=lessons_text,
+            metric_name=metric_name or "unknown",
+            data_schema=data_schema,
         )
         
         # Call LLM
@@ -88,6 +108,51 @@ class ModularAgent(BaseAgent):
                 normalized[name] = str(desc)
         return normalized
     
+    def get_module_order(
+        self,
+        modules: Dict[str, str],
+    ) -> List[str]:
+        """
+        Return modules sorted in dependency order (topological sort).
+
+        Asks the LLM which modules depend on which others, then produces
+        an order where each module is generated after its dependencies.
+        Modules with no dependencies come first.
+
+        Returns:
+            Ordered list of module names (without 'main').
+        """
+        non_main = [m for m in modules if m != "main"]
+        if len(non_main) <= 1:
+            return non_main
+
+        modules_summary = "\n".join(
+            f"- {name}: {desc[:120]}" for name, desc in modules.items() if name != "main"
+        )
+        prompt = (
+            "Given these ML pipeline modules, list them in dependency order "
+            "(the module that others import from comes FIRST).\n\n"
+            f"Modules:\n{modules_summary}\n\n"
+            "Return ONLY a JSON array of module names in the correct generation order. "
+            'Example: ["config", "data_loader", "feature_engineering", "model", "trainer"]'
+        )
+
+        try:
+            response = self.call_llm(user_message=prompt, temperature=0, max_tokens=512)
+            import json, re
+            content = response.get("content", "")
+            m = re.search(r'\[.*?\]', content, re.DOTALL)
+            if m:
+                ordered = json.loads(m.group())
+                # Keep only names that actually exist; append any missing ones at the end
+                valid = [n for n in ordered if n in non_main]
+                missing = [n for n in non_main if n not in valid]
+                return valid + missing
+        except Exception as e:
+            self.log(f"  Module ordering failed ({e}), using original order")
+
+        return non_main
+
     def validate_decomposition(
         self,
         modules: Dict[str, str]

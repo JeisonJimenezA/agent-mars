@@ -20,6 +20,8 @@ class ReviewAgent(BaseAgent):
         code: str,
         execution_output: str = "",
         execution_error: str = "",
+        metric_name: str = "",
+        lower_is_better: bool = False,
     ) -> Optional[Dict]:
         """
         Review execution results and extract findings.
@@ -45,11 +47,15 @@ class ReviewAgent(BaseAgent):
         if execution_error:
             term_out += "\n\nSTDERR:\n" + execution_error
 
+        direction = "lower is better (minimize)" if lower_is_better else "higher is better (maximize)"
+        metric_context = f"{metric_name} ({direction})" if metric_name else direction
+
         prompt = self.prompt_manager.get_prompt(
             "execution_review",
             problem_description=problem_description,
-            code=code[:6000],
-            term_out=term_out[-6000:],
+            code=code,
+            term_out=term_out,
+            metric_name=metric_context,
         )
 
         response = self.call_llm(

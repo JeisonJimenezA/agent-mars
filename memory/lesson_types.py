@@ -19,7 +19,8 @@ class Lesson:
     timestamp: float = field(default_factory=time.time)
     source_node_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+    challenge_name: str = ""
+
     def to_dict(self) -> dict:
         """Convert to dictionary"""
         return {
@@ -29,6 +30,7 @@ class Lesson:
             "timestamp": self.timestamp,
             "source_node_id": self.source_node_id,
             "metadata": self.metadata,
+            "challenge_name": self.challenge_name,
         }
     
     def to_json(self) -> str:
@@ -97,6 +99,7 @@ class SolutionLesson(Lesson):
             timestamp=data.get("timestamp", time.time()),
             source_node_id=data.get("source_node_id"),
             metadata=data.get("metadata", {}),
+            challenge_name=data.get("challenge_name", ""),
             summary=data.get("summary", ""),
             empirical_findings=data.get("empirical_findings", ""),
             key_lesson=data.get("key_lesson", ""),
@@ -165,6 +168,7 @@ class DebugLesson(Lesson):
             timestamp=data.get("timestamp", time.time()),
             source_node_id=data.get("source_node_id"),
             metadata=data.get("metadata", {}),
+            challenge_name=data.get("challenge_name", ""),
             explanation=data.get("explanation", ""),
             detection=data.get("detection", ""),
             fix_description=data.get("fix_description", ""),

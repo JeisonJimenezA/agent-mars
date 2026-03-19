@@ -13,15 +13,17 @@ class LessonPool:
     """
     Manages the pool of lessons learned during search.
     Implements lesson management from Section 4.3.
-    
+
     Features:
     - Separate pools for Solution and Debug lessons
     - Deduplication to avoid redundant lessons
-    - Retrieval of most recent K lessons
+    - Retrieval of most recent K lessons sorted by impact
+    - Challenge-scoped: lessons from other challenges are ignored
     """
-    
-    def __init__(self, max_lessons: int = None):
+
+    def __init__(self, max_lessons: int = None, challenge_name: str = ""):
         self.max_lessons = max_lessons or Config.KM
+        self.challenge_name = challenge_name
         
         # Separate pools by type
         self.solution_lessons: List[SolutionLesson] = []
@@ -51,7 +53,7 @@ class LessonPool:
         if check_duplicate:
             if self._is_duplicate(lesson):
                 self.total_deduplicated += 1
-                print(f"  ⊘ Lesson rejected as duplicate: {lesson.title}")
+                print(f"  [SKIP] Lesson rejected as duplicate: {lesson.title}")
                 return False
 
         # Add to appropriate pool
@@ -60,18 +62,18 @@ class LessonPool:
             # Enforce KM limit - remove oldest if exceeds max
             if len(self.solution_lessons) > self.max_lessons:
                 removed = self.solution_lessons.pop(0)
-                print(f"  ⊖ Evicted oldest lesson to maintain KM={self.max_lessons}: {removed.id}")
+                print(f"  [EVICT] Oldest lesson removed to maintain KM={self.max_lessons}: {removed.id}")
         elif lesson.type == LessonType.DEBUG:
             self.debug_lessons.append(lesson)
             # Enforce KM limit for debug lessons too
             if len(self.debug_lessons) > self.max_lessons:
                 removed = self.debug_lessons.pop(0)
-                print(f"  ⊖ Evicted oldest debug lesson to maintain KM={self.max_lessons}: {removed.id}")
+                print(f"  [EVICT] Oldest debug lesson removed to maintain KM={self.max_lessons}: {removed.id}")
         else:
             raise ValueError(f"Unknown lesson type: {lesson.type}")
 
         self.total_added += 1
-        print(f"  ✓ Lesson added: {lesson.id} - {lesson.title}")
+        print(f"  [OK] Lesson added: {lesson.id} - {lesson.title}")
 
         return True
     
@@ -96,12 +98,12 @@ class LessonPool:
             if lesson.title.lower().strip() == new_lesson.title.lower().strip():
                 return True
 
-        # LLM-based semantic deduplication
+        # LLM-based semantic deduplication (check ALL existing lessons, not just last 15)
         try:
             client = get_client()
             pm = get_prompt_manager()
 
-            existing_text = "\n\n".join(l.format_for_prompt() for l in existing[-15:])
+            existing_text = "\n\n".join(l.format_for_prompt() for l in existing)
             new_text = new_lesson.format_for_prompt()
 
             prompt = pm.get_prompt(
@@ -141,28 +143,40 @@ class LessonPool:
         k: Optional[int] = None
     ) -> List[Lesson]:
         """
-        Get K most recent lessons of specified type.
-        
+        Get K most impactful lessons of specified type, filtered by challenge.
+
+        Sort order: lessons with highest absolute metric_delta first,
+        then most recent among ties. Only returns lessons from the current
+        challenge (or lessons without a challenge tag for backwards compat).
+
         Args:
             lesson_type: Type of lessons to retrieve (None = all)
             k: Number of lessons (None = use max_lessons)
-            
+
         Returns:
-            List of lessons, most recent first
+            List of lessons ordered by impact
         """
         k = k or self.max_lessons
-        
+
         if lesson_type == LessonType.SOLUTION:
-            lessons = self.solution_lessons[-k:]
+            pool = self.solution_lessons
         elif lesson_type == LessonType.DEBUG:
-            lessons = self.debug_lessons[-k:]
+            pool = self.debug_lessons
         else:
-            # Combine both, sorted by timestamp
-            all_lessons = self.solution_lessons + self.debug_lessons
-            all_lessons.sort(key=lambda x: x.timestamp, reverse=True)
-            lessons = all_lessons[:k]
-        
-        return list(reversed(lessons))  # Most recent first
+            pool = self.solution_lessons + self.debug_lessons
+
+        # Filter by challenge — keep lessons that match or have no tag
+        if self.challenge_name:
+            pool = [l for l in pool if not l.challenge_name or l.challenge_name == self.challenge_name]
+
+        # Sort: highest absolute metric impact first, then newest
+        def sort_key(lesson):
+            delta = getattr(lesson, "metric_delta", None)
+            impact = abs(delta) if delta is not None else 0.0
+            return (impact, lesson.timestamp)
+
+        sorted_lessons = sorted(pool, key=sort_key, reverse=True)
+        return sorted_lessons[:k]
     
     def format_for_prompt(
         self,
@@ -215,28 +229,38 @@ class LessonPool:
             "statistics": self.get_statistics(),
         }
         
-        with open(filepath, 'w') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
         
         print(f"Lessons saved to {filepath}")
     
     def load_from_file(self, filepath: Path):
-        """Load lessons from JSON file"""
-        with open(filepath, 'r') as f:
+        """Load lessons from JSON file, filtering to current challenge."""
+        with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        
-        # Load solution lessons
+
+        loaded_solution = 0
+        loaded_debug = 0
+        skipped = 0
+
         for lesson_data in data.get("solution_lessons", []):
             lesson = SolutionLesson.from_dict(lesson_data)
-            self.solution_lessons.append(lesson)
-        
-        # Load debug lessons
+            # Keep if no challenge tag (legacy) or matches current challenge
+            if not lesson.challenge_name or not self.challenge_name or lesson.challenge_name == self.challenge_name:
+                self.solution_lessons.append(lesson)
+                loaded_solution += 1
+            else:
+                skipped += 1
+
         for lesson_data in data.get("debug_lessons", []):
             lesson = DebugLesson.from_dict(lesson_data)
-            self.debug_lessons.append(lesson)
-        
-        print(f"Loaded {len(self.solution_lessons)} solution lessons")
-        print(f"Loaded {len(self.debug_lessons)} debug lessons")
+            if not lesson.challenge_name or not self.challenge_name or lesson.challenge_name == self.challenge_name:
+                self.debug_lessons.append(lesson)
+                loaded_debug += 1
+            else:
+                skipped += 1
+
+        print(f"Loaded {loaded_solution} solution lessons, {loaded_debug} debug lessons (skipped {skipped} from other challenges)")
     
     def clear(self):
         """Clear all lessons"""

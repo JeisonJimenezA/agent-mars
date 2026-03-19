@@ -76,21 +76,22 @@ class LLMClient:
         self,
         messages: List[Dict[str, str]],
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None
+        max_tokens: Optional[int] = None,
+        stream: bool = False,
     ) -> Dict[str, Any]:
-        """Make chat completion request"""
+        """Make chat completion request. Pass stream=True for live token output (Ollama only)."""
 
         # Rate limiting
         self._rate_limit()
 
         if self.provider == "ollama":
-            return self._ollama_completion(messages, temperature, max_tokens)
+            return self._ollama_completion(messages, temperature, max_tokens, stream)
         else:
             return self._openrouter_completion(messages, temperature, max_tokens)
 
-    def _ollama_completion(self, messages, temperature, max_tokens):
+    def _ollama_completion(self, messages, temperature, max_tokens, stream=False):
         """Ollama local LLM call - delegates to OllamaClient."""
-        result = self._ollama_client.chat_completion(messages, temperature, max_tokens)
+        result = self._ollama_client.chat_completion(messages, temperature, max_tokens, stream=stream)
 
         self.total_requests += 1
         self.total_tokens += result.get("total_tokens", 0)

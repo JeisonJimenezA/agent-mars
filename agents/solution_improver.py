@@ -27,7 +27,11 @@ class SolutionImprover(BaseAgent):
         problem_description: str,
         current_solution: Dict[str, str],  # {filename: code}
         current_metric: Optional[float],
-        lesson_pool: LessonPool
+        lesson_pool: LessonPool,
+        metric_name: str = "",
+        lower_is_better: bool = False,
+        data_schema: str = "",
+        applied_modifications: Optional[List[str]] = None,
     ) -> Tuple[bool, Dict[str, str], str]:
         """
         Propose improvements to current solution.
@@ -51,7 +55,11 @@ class SolutionImprover(BaseAgent):
             problem_description,
             solution_text,
             current_metric,
-            solution_lessons
+            solution_lessons,
+            metric_name=metric_name,
+            lower_is_better=lower_is_better,
+            data_schema=data_schema,
+            applied_modifications=applied_modifications or [],
         )
         
         # Call LLM - usar max tokens del modelo (8192)
@@ -116,23 +124,44 @@ class SolutionImprover(BaseAgent):
         problem_description: str,
         solution_text: str,
         current_metric: Optional[float],
-        lessons: str
+        lessons: str,
+        metric_name: str = "",
+        lower_is_better: bool = False,
+        data_schema: str = "",
+        applied_modifications: Optional[List[str]] = None,
     ) -> str:
         """Create prompt for improvement proposal"""
-        
+
+        direction = "lower is better (minimize)" if lower_is_better else "higher is better (maximize)"
         metric_context = ""
         if current_metric is not None:
-            metric_context = f"Current validation metric: {current_metric:.6f}"
-        
+            metric_context = (
+                f"Metric: **{metric_name or 'unknown'}** ({direction})\n"
+                f"Current value: {current_metric:.6f}"
+            )
+
+        # Novelty constraint: list modifications already applied on this lineage
+        diversity_block = ""
+        if applied_modifications:
+            mods_list = "\n".join(f"  - {m}" for m in applied_modifications[-10:])
+            diversity_block = (
+                f"\nALREADY APPLIED MODIFICATIONS (do NOT repeat these):\n"
+                f"{mods_list}\n"
+                "You MUST propose changes that are FUNDAMENTALLY DIFFERENT from the list above.\n"
+            )
+
         prompt = f"""You are improving an ML solution. Propose targeted modifications to boost performance.
 
 PROBLEM:
-{problem_description[:600]}
+{problem_description}
 
-CURRENT SOLUTION:
-{solution_text[:3000]}
+DATA SCHEMA:
+{data_schema if data_schema else "No schema available."}
 
 {metric_context}
+{diversity_block}
+CURRENT SOLUTION:
+{solution_text}
 
 LEARNED LESSONS:
 {lessons}

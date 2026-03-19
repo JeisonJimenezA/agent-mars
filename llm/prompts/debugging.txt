@@ -1,3 +1,24 @@
+==== Data File Locations (CRITICAL) ====
+Always access data through env vars — NEVER hardcode absolute or relative paths:
+  import os
+  DATA_DIR     = os.environ.get('DATA_DIR', '.')
+  METADATA_DIR = os.environ.get('METADATA_DIR', './metadata')
+
+  os.path.join(DATA_DIR, 'train.csv')           <- full original train set
+  os.path.join(DATA_DIR, 'test.csv')            <- TEST SET for submission predictions
+  os.path.join(DATA_DIR, 'sample_submission.csv') <- FORMAT TEMPLATE ONLY (not the test set!)
+  os.path.join(METADATA_DIR, 'train.csv')       <- 80% training split
+  os.path.join(METADATA_DIR, 'val.csv')         <- 20% validation split
+  ./submission/submission.csv                   <- output file for final predictions
+
+CRITICAL: sample_submission.csv is a format template — NEVER use it as the test set.
+
+==== Metric to Optimize ====
+{metric_name}
+
+==== Data Schema ====
+{data_schema}
+
 ==== Debug Lessons ====
 {lessons}
 
@@ -66,13 +87,15 @@ from sklearn.ensemble import RandomForestClassifier
 
 **Fix 2: Correct File Path**
 Target File: main.py
-Reasoning: FileNotFoundError - file is in metadata/ subdirectory
+Reasoning: FileNotFoundError - must use METADATA_DIR/DATA_DIR env vars, never hardcode paths
 ```python
 # OLD:
 train = pd.read_csv('train.csv')
 
 # NEW:
-train = pd.read_csv('metadata/train.csv')
+import os
+METADATA_DIR = os.environ.get('METADATA_DIR', './metadata')
+train = pd.read_csv(os.path.join(METADATA_DIR, 'train.csv'))
 ```
 
 **Fix 3: Fix Variable Name Typo**

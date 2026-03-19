@@ -160,7 +160,7 @@ class TaskPreparation:
         }
         
         info_path = self.metadata_dir / "split_info.json"
-        with open(info_path, 'w') as f:
+        with open(info_path, 'w', encoding='utf-8') as f:
             json.dump(split_info, f, indent=2)
         
         return {
@@ -206,7 +206,7 @@ class TaskPreparation:
         
         # Save documentation
         doc_path = self.metadata_dir / "documentation.md"
-        with open(doc_path, 'w') as f:
+        with open(doc_path, 'w', encoding='utf-8') as f:
             f.write(doc)
         
         print(f"Saved documentation: {doc_path}")
