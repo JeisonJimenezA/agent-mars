@@ -1,5 +1,5 @@
 # agents/idea_agent.py
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from enum import Enum
 from pathlib import Path
 import json
@@ -24,14 +24,46 @@ class CurriculumStage(Enum):
     ADVANCED = "advanced"      # Ideas 4-6: Advanced optimizations
     ENSEMBLE = "ensemble"      # Ideas 7+: Ensemble, stacking, meta-learning
 
+
+class ExplorationPhase(Enum):
+    """
+    High-level exploration phases for radical strategy shifts.
+
+    Unlike CurriculumStage (which is incremental), these phases represent
+    FUNDAMENTAL changes in exploration approach after many iterations.
+
+    Triggers (configurable):
+    - BREADTH_SEARCH: Initial phase (iterations 1-15)
+    - DEEP_EXPLOIT: After all models tried once (iterations 16-30)
+    - RADICAL_PIVOT: After prolonged stagnation (iterations 31-45)
+    - ENSEMBLE_SYNTHESIS: Final phase (iterations 46+)
+    """
+    BREADTH_SEARCH = "breadth_search"      # Explore all model families
+    DEEP_EXPLOIT = "deep_exploit"          # Exploit top 2 models deeply
+    RADICAL_PIVOT = "radical_pivot"        # Reframe problem, new SOTA search
+    ENSEMBLE_SYNTHESIS = "ensemble_synth"  # Combine best approaches found
+
 class IdeaAgent(BaseAgent):
     """
     Agent responsible for generating solution ideas.
     Implements curriculum-based idea generation from Section 4.5.
-    
-    Now includes SOTA model discovery via SearchAgent.
+
+    Now includes:
+    - SOTA model discovery via SearchAgent
+    - Exploration Phases for radical strategy shifts after many iterations
     """
-    
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # EXPLORATION PHASE THRESHOLDS (configurable)
+    # ═══════════════════════════════════════════════════════════════════════════
+    PHASE_BREADTH_END: int = 15        # End of breadth search phase
+    PHASE_DEEP_EXPLOIT_END: int = 30   # End of deep exploitation phase
+    PHASE_RADICAL_PIVOT_END: int = 45  # End of radical pivot phase
+    # After this: ENSEMBLE_SYNTHESIS indefinitely
+
+    # Stagnation threshold to force early pivot (iterations without >5% improvement)
+    STAGNATION_PIVOT_THRESHOLD: int = 10
+
     def __init__(self, cache_dir: Optional[Path] = None):
         super().__init__("IdeaAgent")
         self.generated_ideas: List[str] = []
@@ -41,6 +73,16 @@ class IdeaAgent(BaseAgent):
         # Curriculum exploration (Mejora 3)
         self.current_stage: CurriculumStage = CurriculumStage.BASELINE
         self.stage_history: List[CurriculumStage] = []
+
+        # ═══════════════════════════════════════════════════════════════════════════
+        # EXPLORATION PHASES (NEW)
+        # ═══════════════════════════════════════════════════════════════════════════
+        self.current_phase: ExplorationPhase = ExplorationPhase.BREADTH_SEARCH
+        self.phase_history: List[ExplorationPhase] = []
+        self.total_iterations: int = 0
+        self.iterations_without_significant_improvement: int = 0
+        self.best_metric_at_phase_start: Optional[float] = None
+        self.top_models_for_exploitation: List[Dict] = []  # Top 2 models for DEEP_EXPLOIT
 
         # Persistent cache for discovered models
         self._cache_dir = cache_dir or Config.WORKING_DIR / Config.CACHE_DIR
@@ -83,48 +125,55 @@ class IdeaAgent(BaseAgent):
         self,
         problem_description: str,
         eda_report: str,
-        model_architectures: List[Dict[str, str]] = None  # ← Now optional
+        model_architectures: List[Dict[str, str]] = None,  # ← Now optional
+        force_model: Optional[Dict[str, str]] = None,  # ← NEW: Force specific model
+        force_model_index: int = -1,  # ← NEW: Index of forced model
     ) -> Optional[str]:
         """
         Generate initial lightweight baseline idea.
-        
+
         NOW INCLUDES: Automatic SOTA model discovery via web search.
-        
+
         Args:
             problem_description: Task description
             eda_report: EDA insights
             model_architectures: Optional pre-discovered models (legacy)
-            
+            force_model: If provided, use this specific model (from MCTS rotation)
+            force_model_index: Index of the forced model in discovered_models
+
         Returns:
             Natural language idea description
         """
         self.log("Generating initial baseline idea...")
-        
+
         # ========================================
-        # STEP 1: Discover SOTA Models (NEW!)
+        # STEP 1: Discover SOTA Models (or use provided)
         # ========================================
-        if not model_architectures:
+        if not model_architectures and not self.discovered_models:
             self.log("  Discovering SOTA models via search...")
             self.discovered_models = self.search_agent.search_sota_models(
                 problem_description=problem_description,
                 num_candidates=5
             )
             model_architectures = self.discovered_models
-        else:
-            self.discovered_models = model_architectures
-        
+        elif not model_architectures:
+            model_architectures = self.discovered_models
+
         # ========================================
-        # STEP 2: Select Lightweight Baseline
+        # STEP 2: Select Model (forced or baseline)
         # ========================================
-        # Pick the simplest/most efficient model for initial baseline
-        if model_architectures:
+        if force_model:
+            # MCTS is forcing a specific model for exploration
+            baseline_model = force_model
+            self.log(f"  FORCED model by MCTS: {baseline_model['name']} (index {force_model_index})")
+        elif model_architectures:
             # Heuristic: prefer models with "efficient", "light", or first in list
             baseline_model = self._select_baseline_model(model_architectures)
             self.log(f"  Selected baseline: {baseline_model['name']}")
         else:
             baseline_model = None
             self.log("  No models discovered, agent will propose generic approach")
-        
+
         # ========================================
         # STEP 3: Generate Idea with Model Context
         # ========================================
@@ -132,9 +181,10 @@ class IdeaAgent(BaseAgent):
             problem_description,
             eda_report,
             baseline_model,
-            model_architectures
+            model_architectures,
+            force_model=force_model is not None,
         )
-        
+
         response = self.call_llm(
             user_message=prompt,
             temperature=0.5,
@@ -143,10 +193,21 @@ class IdeaAgent(BaseAgent):
 
         idea = response["content"].strip()
         self.generated_ideas.append(idea)
-        
+
         self.log(f"Generated initial idea ({len(idea)} chars)")
-        
+
+        # Return model info along with idea for tracking
+        self._last_used_model = baseline_model
+        self._last_used_model_index = force_model_index if force_model else 0
+
         return idea
+
+    def get_last_used_model_info(self) -> Tuple[Optional[Dict], int]:
+        """Get info about the last model used in idea generation"""
+        return (
+            getattr(self, '_last_used_model', None),
+            getattr(self, '_last_used_model_index', -1)
+        )
     
     def improve_idea(
         self,
@@ -230,8 +291,11 @@ class IdeaAgent(BaseAgent):
         if best_solution_context:
             prompt = prompt + best_solution_context
 
-        # Inject curriculum guidance + novelty constraint at the start
-        prompt = f"{curriculum_guidance}\n\n{novelty_block}\n\n{prompt}"
+        # Get exploration phase guidance (higher-level than curriculum)
+        phase_guidance = self.get_phase_guidance()
+
+        # Inject phase guidance + curriculum guidance + novelty constraint at the start
+        prompt = f"{phase_guidance}\n\n{curriculum_guidance}\n\n{novelty_block}\n\n{prompt}"
 
         # ══════════════════════════════════════════════════════════════
         # TEMPERATURE ADJUSTMENT BY STAGE
@@ -394,17 +458,36 @@ Explore ENSEMBLE and META-LEARNING strategies:
         problem_description: str,
         eda_report: str,
         baseline_model: Optional[Dict[str, str]],
-        all_models: List[Dict[str, str]]
+        all_models: List[Dict[str, str]],
+        force_model: bool = False,
     ) -> str:
         """
         Create prompt for initial idea generation.
-        
+
         Includes discovered model context.
+
+        Args:
+            force_model: If True, the model is being forced by MCTS rotation
         """
         # Format models as context
         models_context = ""
         if baseline_model:
-            models_context = f"""
+            if force_model:
+                # Stronger language when MCTS forces a specific model
+                models_context = f"""
+═══════════════════════════════════════════════════════════════════════════
+MANDATORY MODEL (assigned by exploration system):
+You MUST use this model: **{baseline_model['name']}**
+
+Reasoning: {baseline_model.get('reasoning', 'Selected for systematic exploration')}
+
+Description: {baseline_model.get('description', 'Standard architecture')}
+
+DO NOT suggest a different model. Build the solution around {baseline_model['name']}.
+═══════════════════════════════════════════════════════════════════════════
+"""
+            else:
+                models_context = f"""
 BASELINE MODEL RECOMMENDATION:
 Based on automated search, we recommend starting with: {baseline_model['name']}
 
@@ -414,10 +497,18 @@ Description: {baseline_model.get('description', 'Standard architecture')}
 
 OTHER DISCOVERED MODELS (for reference):
 """
-            for i, model in enumerate(all_models[:4], 1):
-                if model['name'] != baseline_model['name']:
-                    models_context += f"{i}. {model['name']} - {model.get('reasoning', 'Alternative approach')}\n"
-        
+                for i, model in enumerate(all_models[:4], 1):
+                    if model['name'] != baseline_model['name']:
+                        models_context += f"{i}. {model['name']} - {model.get('reasoning', 'Alternative approach')}\n"
+
+        model_instruction = ""
+        if force_model and baseline_model:
+            model_instruction = f"""
+CRITICAL: You MUST use {baseline_model['name']} as the primary model.
+Do NOT propose alternative models. The exploration system is systematically
+testing each model to find the best one for this problem.
+"""
+
         prompt = f"""You are an expert ML engineer. Based on the challenge description below, propose a simple baseline solution.
 
 CHALLENGE DESCRIPTION:
@@ -440,7 +531,7 @@ IMPORTANT:
 - Keep it simple and fast to implement
 - Focus on a working solution, not perfection
 - Be specific about the model architecture to use
-
+{model_instruction}
 Describe your solution idea in 5-8 sentences. Include:
 1. Problem type and approach
 2. Specific model/architecture to use
@@ -448,7 +539,7 @@ Describe your solution idea in 5-8 sentences. Include:
 4. Training strategy
 5. Evaluation approach
 """
-        
+
         return prompt
     
     def _format_previous_ideas(self, ideas: Optional[List[str]] = None) -> str:
@@ -521,18 +612,270 @@ Describe your solution idea in 5-8 sentences. Include:
     def _extract_citations(self, text: str) -> List[str]:
         """
         Extract lesson citations from text.
-        
+
         Looks for pattern: "Cite {lesson_id}"
-        
+
         Args:
             text: Text containing citations
-            
+
         Returns:
             List of cited lesson IDs
         """
         import re
-        
+
         pattern = r'Cite\s+\{([^}]+)\}'
         matches = re.findall(pattern, text, re.IGNORECASE)
-        
+
         return matches
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # EXPLORATION PHASES (Radical Strategy Shifts)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def update_exploration_state(
+        self,
+        iteration: int,
+        current_best_metric: Optional[float],
+        model_exploration_stats: Dict[int, Dict],
+        lower_is_better: bool = False,
+    ) -> ExplorationPhase:
+        """
+        Update exploration phase based on search progress.
+
+        Called by orchestrator after each iteration to track state and
+        determine if a phase transition is needed.
+
+        Args:
+            iteration: Current MCTS iteration number
+            current_best_metric: Best metric found so far
+            model_exploration_stats: Per-model stats from MCTS
+            lower_is_better: Metric direction
+
+        Returns:
+            Current exploration phase (may have changed)
+        """
+        self.total_iterations = iteration
+        old_phase = self.current_phase
+
+        # Track significant improvement (>5%)
+        if self.best_metric_at_phase_start is not None and current_best_metric is not None:
+            if lower_is_better:
+                improvement = (self.best_metric_at_phase_start - current_best_metric) / max(abs(self.best_metric_at_phase_start), 1e-6)
+            else:
+                improvement = (current_best_metric - self.best_metric_at_phase_start) / max(abs(self.best_metric_at_phase_start), 1e-6)
+
+            if improvement > 0.05:  # 5% improvement threshold
+                self.iterations_without_significant_improvement = 0
+                self.best_metric_at_phase_start = current_best_metric
+            else:
+                self.iterations_without_significant_improvement += 1
+        else:
+            self.best_metric_at_phase_start = current_best_metric
+
+        # Determine new phase
+        new_phase = self._determine_exploration_phase(iteration, model_exploration_stats)
+
+        if new_phase != old_phase:
+            self._on_phase_transition(old_phase, new_phase, model_exploration_stats)
+
+        self.current_phase = new_phase
+        self.phase_history.append(new_phase)
+
+        return new_phase
+
+    def _determine_exploration_phase(
+        self,
+        iteration: int,
+        model_exploration_stats: Dict[int, Dict],
+    ) -> ExplorationPhase:
+        """
+        Determine which exploration phase we're in.
+
+        Phase transitions:
+        1. BREADTH_SEARCH → DEEP_EXPLOIT: After PHASE_BREADTH_END iterations OR
+           all models have been tried at least once
+        2. DEEP_EXPLOIT → RADICAL_PIVOT: After PHASE_DEEP_EXPLOIT_END iterations OR
+           prolonged stagnation (STAGNATION_PIVOT_THRESHOLD)
+        3. RADICAL_PIVOT → ENSEMBLE_SYNTHESIS: After PHASE_RADICAL_PIVOT_END iterations
+        """
+        # Check for prolonged stagnation → force RADICAL_PIVOT early
+        if (self.iterations_without_significant_improvement >= self.STAGNATION_PIVOT_THRESHOLD
+            and self.current_phase in (ExplorationPhase.BREADTH_SEARCH, ExplorationPhase.DEEP_EXPLOIT)):
+            self.log(f"  [Phase] Prolonged stagnation ({self.iterations_without_significant_improvement} iters) → RADICAL_PIVOT")
+            return ExplorationPhase.RADICAL_PIVOT
+
+        # Check if all models have been explored (triggers early transition to DEEP_EXPLOIT)
+        all_models_explored = False
+        if model_exploration_stats:
+            all_models_explored = all(
+                stats.get("valid_count", 0) > 0
+                for stats in model_exploration_stats.values()
+            )
+
+        # Normal phase progression based on iteration count
+        if iteration <= self.PHASE_BREADTH_END and not all_models_explored:
+            return ExplorationPhase.BREADTH_SEARCH
+        elif iteration <= self.PHASE_DEEP_EXPLOIT_END:
+            return ExplorationPhase.DEEP_EXPLOIT
+        elif iteration <= self.PHASE_RADICAL_PIVOT_END:
+            return ExplorationPhase.RADICAL_PIVOT
+        else:
+            return ExplorationPhase.ENSEMBLE_SYNTHESIS
+
+    def _on_phase_transition(
+        self,
+        old_phase: ExplorationPhase,
+        new_phase: ExplorationPhase,
+        model_exploration_stats: Dict[int, Dict],
+    ):
+        """
+        Handle phase transition actions.
+
+        - DEEP_EXPLOIT: Identify top 2 models to focus on
+        - RADICAL_PIVOT: Trigger new SOTA search with different queries
+        - ENSEMBLE_SYNTHESIS: Prepare best models for combination
+        """
+        self.log(f"  [Phase] TRANSITION: {old_phase.value} -> {new_phase.value}")
+        self.iterations_without_significant_improvement = 0
+
+        if new_phase == ExplorationPhase.DEEP_EXPLOIT:
+            # Identify top 2 models by best_metric
+            self.top_models_for_exploitation = self._get_top_models(model_exploration_stats, n=2)
+            model_names = [m.get("name", "?") for m in self.top_models_for_exploitation]
+            self.log(f"  [Phase] DEEP_EXPLOIT: Focusing on top models: {model_names}")
+
+        elif new_phase == ExplorationPhase.RADICAL_PIVOT:
+            self.log("  [Phase] RADICAL_PIVOT: Will re-search SOTA with different queries")
+            # Clear discovered models to force new search
+            # (But keep the old ones as backup in case new search fails)
+            self._backup_models = self.discovered_models.copy()
+
+        elif new_phase == ExplorationPhase.ENSEMBLE_SYNTHESIS:
+            self.log("  [Phase] ENSEMBLE_SYNTHESIS: Will combine best approaches")
+
+    def _get_top_models(self, model_exploration_stats: Dict[int, Dict], n: int = 2) -> List[Dict]:
+        """Get the top N models by best_metric."""
+        if not model_exploration_stats or not self.discovered_models:
+            return []
+
+        # Sort models by best_metric (handle None values)
+        scored_models = []
+        for idx, stats in model_exploration_stats.items():
+            if int(idx) < len(self.discovered_models):
+                model = self.discovered_models[int(idx)]
+                best_metric = stats.get("best_metric")
+                if best_metric is not None:
+                    scored_models.append((model, best_metric))
+
+        # Sort by metric (descending for maximize, would need to adjust for minimize)
+        scored_models.sort(key=lambda x: x[1], reverse=True)
+
+        return [m[0] for m in scored_models[:n]]
+
+    def get_phase_guidance(self) -> str:
+        """
+        Get guidance text for the current exploration phase.
+
+        This is injected into the idea generation prompt to steer
+        the LLM toward the appropriate strategy.
+        """
+        guidance = {
+            ExplorationPhase.BREADTH_SEARCH: """
+═══════════════════════════════════════════════════════════════════════════════
+EXPLORATION PHASE: BREADTH SEARCH
+═══════════════════════════════════════════════════════════════════════════════
+Strategy: Explore DIVERSE model families to find promising directions.
+
+Rules:
+- Try different model architectures (not just variations of the same model)
+- Keep implementations relatively simple
+- Focus on understanding what works for this problem type
+- Document clearly what each approach does well/poorly
+═══════════════════════════════════════════════════════════════════════════════
+""",
+            ExplorationPhase.DEEP_EXPLOIT: f"""
+═══════════════════════════════════════════════════════════════════════════════
+EXPLORATION PHASE: DEEP EXPLOITATION
+═══════════════════════════════════════════════════════════════════════════════
+Strategy: Focus on EXPLOITING the best-performing approaches with deeper tuning.
+
+TOP MODELS TO FOCUS ON:
+{self._format_top_models()}
+
+Rules:
+- Stick to the top-performing model families
+- Focus on hyperparameter optimization
+- Try advanced feature engineering for these specific models
+- Experiment with training strategies (learning rate schedules, early stopping)
+- Do NOT switch to completely different model families
+═══════════════════════════════════════════════════════════════════════════════
+""",
+            ExplorationPhase.RADICAL_PIVOT: """
+═══════════════════════════════════════════════════════════════════════════════
+EXPLORATION PHASE: RADICAL PIVOT
+═══════════════════════════════════════════════════════════════════════════════
+Strategy: FUNDAMENTALLY CHANGE the approach. Previous strategies have plateaued.
+
+Rules:
+- Reframe the problem (e.g., classification→ranking, regression→classification)
+- Try completely different preprocessing (different normalization, embeddings)
+- Consider domain-specific techniques not tried before
+- Look at the problem from a different angle
+- If tabular: try deep learning. If deep learning: try gradient boosting
+- Consider data augmentation or pseudo-labeling
+- Think: "What would a domain expert do differently?"
+═══════════════════════════════════════════════════════════════════════════════
+""",
+            ExplorationPhase.ENSEMBLE_SYNTHESIS: """
+═══════════════════════════════════════════════════════════════════════════════
+EXPLORATION PHASE: ENSEMBLE SYNTHESIS
+═══════════════════════════════════════════════════════════════════════════════
+Strategy: COMBINE the best approaches found throughout the search.
+
+Rules:
+- Create ensembles of top-performing models
+- Use stacking with diverse base models
+- Try blending with optimized weights
+- Use out-of-fold predictions for second-level models
+- Focus on model diversity in ensembles (different algorithms, different features)
+- The goal is to extract maximum value from what we've learned
+═══════════════════════════════════════════════════════════════════════════════
+""",
+        }
+        return guidance.get(self.current_phase, "")
+
+    def _format_top_models(self) -> str:
+        """Format top models for deep exploitation prompt."""
+        if not self.top_models_for_exploitation:
+            return "No top models identified yet."
+
+        lines = []
+        for i, model in enumerate(self.top_models_for_exploitation, 1):
+            lines.append(f"  {i}. {model.get('name', 'Unknown')}")
+        return "\n".join(lines)
+
+    def trigger_radical_search(self, problem_description: str) -> List[Dict[str, str]]:
+        """
+        Trigger a new SOTA search with DIFFERENT queries.
+
+        Called during RADICAL_PIVOT phase to find alternative approaches
+        that weren't discovered in the initial search.
+        """
+        self.log("  [Phase] Triggering radical SOTA re-search...")
+
+        # Use different search queries to find alternative approaches
+        new_models = self.search_agent.search_sota_models(
+            problem_description=problem_description,
+            num_candidates=5,
+            alternative_search=True  # Flag for different query generation
+        )
+
+        if new_models:
+            # Merge with existing models (avoid duplicates)
+            existing_names = {m.get("name", "").lower() for m in self.discovered_models}
+            for model in new_models:
+                if model.get("name", "").lower() not in existing_names:
+                    self.discovered_models.append(model)
+                    self.log(f"  [Phase] Discovered new model: {model.get('name')}")
+
+        return new_models

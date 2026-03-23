@@ -1,0 +1,130 @@
+CLARITY - Political Response Clarity Classification Challenge
+
+OBJECTIVE:
+Given a question-answer (QA) pair extracted from a political interview, classify
+the response according to its degree of clarity or evasion. This is a hierarchical
+text classification task operating on two levels:
+
+  Task 1 — Clarity-level: classify the answer as "Clear Reply", "Ambivalent Reply",
+            or "Clear Non-Reply"
+  Task 2 — Evasion-level: classify the answer into one of 9 fine-grained evasion
+            techniques
+
+The broader goal is to advance computational analysis of political discourse,
+enabling automated detection of evasion strategies at scale and contributing to
+more transparent, accountable political communication.
+
+CONTEXT AND MOTIVATION:
+- Politicians give clear responses to only 39–46% of questions in televised
+  interviews, versus 70–89% for non-politicians — evasion is deliberate and systematic
+- Existing NLP work largely ignores equivocation and response ambiguity in political speech
+- The dataset is grounded in well-established political science theory on equivocation,
+  presented at EMNLP 2024 (Thomas et al., 2024)
+- Annotations follow a two-level hierarchical taxonomy:
+  (1) High-level clarity classification (Task 1)
+  (2) Fine-grained evasion technique classification (Task 2)
+- QA pairs were extracted from real presidential interviews — not synthetically generated
+- The hierarchical structure is intentional: Task 1 and Task 2 labels are consistent
+  and using both levels jointly can improve classification performance
+- Both tasks are evaluated on the same QA pairs
+
+DATASET:
+Files: train.csv, test.csv
+
+Splits:
+- train set : 3,448 labeled examples with questions, answers, and both label levels
+- test set  : 308 examples with questions and answers (no labels) — use ALL rows for predictions
+
+train set columns:
+- title                : Short descriptive title of the interview or event (may be empty)
+- date                 : Date of the interview in standardized format (may be empty)
+- president            : Name or identifier of the political figure interviewed (may be empty)
+- url                  : Link to the source transcript or interview
+- interview_question   : Full original question(s) as posed by the interviewer
+                         (may contain multiple sub-questions in a single turn)
+- interview_answer     : Full text of the interviewee's response
+- gpt3.5_summary       : GPT-3.5-generated summary of the answer (may be empty)
+- gpt3.5_prediction    : GPT-3.5-predicted label for the response (may be empty)
+- question             : Sub-question isolated from interview_question
+                         (if multiple questions were asked, each is separated here)
+- clarity_label        : Task 1 ground truth — one of:
+                         "Clear Reply", "Ambivalent Reply", "Clear Non-Reply"
+- evasion_label        : Task 2 ground truth — one of:
+                         "Explicit", "Implicit", "Dodging", "General", "Deflection",
+                         "Partial/half-answer", "Declining to answer",
+                         "Claims ignorance", "Clarification"
+- annotator_id         : Identifier of the human annotator (may be empty)
+- annotator1           : Label or feedback from annotator 1 in multi-annotator setup (may be empty)
+- annotator2           : Label or feedback from annotator 2 (may be empty)
+- annotator3           : Label or feedback from annotator 3 (may be empty)
+- inaudible            : Boolean — True if part of the answer was inaudible or missing
+- multiple_questions   : Boolean — True if interview_question contained multiple sub-questions
+- affirmative_questions: Boolean — True if the question was phrased affirmatively
+                         (e.g., "Wouldn't you agree…?")
+
+test set columns:
+- (Same structure as train, minus clarity_label and evasion_label)
+
+IMPORTANT DATA NOTES:
+- The primary input for classification is the (question, interview_answer) pair —
+  use the isolated question field when available, as labels are anchored to it
+- interview_question may contain multiple sub-questions; each is broken out into
+  the question field — models should focus on question, not interview_question
+- Optional columns (title, date, president, gpt3.5_*) may be used as auxiliary
+  context but are not guaranteed to be present for all examples
+- The two label levels are hierarchically consistent:
+  * "Clear Reply"     → evasion_label is always "Explicit" or "Implicit"
+  * "Clear Non-Reply" → evasion_label is always "Declining to answer" or "Claims ignorance"
+  * "Ambivalent Reply"→ evasion_label is one of the remaining techniques
+  Exploiting this constraint can reduce the effective label space per task
+- Class distribution is imbalanced — macro F1 is used precisely to penalize
+  models that ignore minority classes
+- A small public sample may be available for code validation;
+  a hidden private set is used for final scoring
+
+LABEL TAXONOMY:
+Task 1 — Clarity labels (3 classes):
+  Clear Reply       : The answer directly and unambiguously addresses the question
+  Ambivalent Reply  : The answer partially or indirectly addresses the question
+  Clear Non-Reply   : The answer does not address the question at all
+
+Task 2 — Evasion labels (9 classes):
+  Explicit          : Direct, unambiguous answer (maps to Clear Reply)
+  Implicit          : Answer is clear but indirect (maps to Clear Reply)
+  Dodging           : Answer deflects without addressing the core question
+  General           : Answer is overly vague or abstract
+  Deflection        : Answer redirects to a different topic
+  Partial/half-answer: Answer addresses only part of what was asked
+  Declining to answer: Speaker explicitly refuses to respond
+  Claims ignorance  : Speaker claims lack of knowledge to avoid answering
+  Clarification     : Speaker questions the question rather than answering it
+
+EVALUATION:
+Metric: Macro F1-score (both tasks)
+Direction: Higher is better (maximize, range: 0.0 to 1.0)
+
+Macro F1 is computed as the unweighted mean of per-class F1 scores:
+
+  F1_macro = (1/C) * Σ F1_c   for c = 1 to C
+
+Where:
+- C     = number of classes (3 for Task 1, 9 for Task 2)
+- F1_c  = F1 score for class c = 2 * (P_c * R_c) / (P_c + R_c)
+- P_c   = precision for class c
+- R_c   = recall for class c
+
+Evaluation is conducted on both the official test set and a held-out private
+evaluation set to ensure robust performance assessment.
+
+CRITICAL NOTES ON THE METRIC:
+- Macro F1 weights ALL classes equally regardless of their frequency in the data
+  — models that only predict majority classes will score poorly
+- Task 2 has 9 classes with significant imbalance — minority evasion techniques
+  (e.g., "Claims ignorance", "Clarification") must be modeled explicitly
+- A model that always predicts the most common class will achieve near-zero macro F1
+- Unlike accuracy, macro F1 does NOT reward correct predictions on frequent classes
+  if rare classes are ignored — invest effort in minority class coverage
+- For Task 2, exploiting the hierarchical constraint (Task 1 label narrows Task 2
+  candidate set) can improve both precision and recall on rare classes
+- Submitting predictions for ALL test rows is mandatory — missing rows count as
+  wrong predictions and directly reduce macro F1

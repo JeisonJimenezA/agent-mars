@@ -159,7 +159,7 @@ class PromptManager:
             
             # Execution parameters
             "exec_timeout": "2 hours",
-            "timeout": "7200",
+            "timeout": "10800",
             
             # Code/Files
             "library_files": "No existing files.",

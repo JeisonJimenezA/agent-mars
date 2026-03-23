@@ -87,7 +87,7 @@ MODULE_TO_PACKAGE = {
 @dataclass
 class ExecutionConfig:
     """Configuration for code execution"""
-    timeout: int = 7200  # 2 hours default
+    timeout: int = 10800  # 2 hours default
     max_memory_mb: int = 30000  # 30GB
     capture_output: bool = True
     working_dir: Optional[Path] = None

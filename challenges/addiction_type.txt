@@ -1,0 +1,135 @@
+MentalRiskES Task 2 - Type of Addiction Detection
+
+OBJECTIVE:
+Multiclass classification task to identify the specific type of gambling addiction from
+user messages in Spanish. Given a collection of messages from a user, predict which
+type of gambling addiction they exhibit.
+
+CONTEXT AND MOTIVATION:
+- Part of the IberLEF 2025 MentalRiskES shared task on early detection of mental health risks
+- All users in this dataset are at risk (low or high) for gambling addiction
+- The goal is to classify the specific TYPE of addiction, not the risk level
+- Messages are in Spanish from Telegram and Twitch
+- Early detection of addiction type can help tailor interventions and support
+
+ADDICTION TYPES (4 classes):
+
+1. betting: Sports betting, particularly football betting
+   - Keywords: apuestas, picks, over/under, momios, parlay, ticket, bank, fútbol
+   - Example: "ya le metí mil", "over 15 pendeja", "me fui all in y cayó rojo"
+
+2. onlinegaming: Traditional games of chance (roulette, blackjack, SLOTS) online
+   - Keywords: slots, free spins, bonus, ruleta, blackjack, casino, bet (casino context)
+   - Example: "24 céntimos con los free spins", "compra un super bonus", "toca gates"
+
+3. trading: Speculative investments in cryptocurrencies
+   - Keywords: BTC, ETH, altcoin, USDT, futuros, long/short, SL, TP, binance, bybit
+   - Example: "pinche btc", "esperando los sl", "apalancamiento", "eth subiendo"
+
+4. lootboxes: Purchase of virtual items in video games with randomized content
+   - Keywords: skins, cajas, CS2/CSGO, sorteo, intercambio, inventario
+   - Example: "al que le tocó sirve para intercambio", "sorteo de la p250"
+
+DATASET STRUCTURE:
+```
+data/addiction_type/
+├── train/
+│   ├── gold.txt              # Labels: Subject,Type
+│   └── subjects/             # 350 JSON files (one per user)
+│       ├── user1036.json
+│       ├── user1037.json
+│       └── ...
+└── test/
+    ├── gold.txt              # Labels: Subject,Risk,Type (Risk: 0=low, 1=high)
+    └── subjects/             # 160 JSON files
+        └── ...
+```
+
+DATA FORMAT:
+
+Gold files (CSV):
+- train: Subject,Type
+- test: Subject,Risk,Type
+
+Each user JSON file is an ARRAY of message objects:
+```json
+[
+  {
+    "id_message": 99298012563,
+    "message": "ya le metí mil",
+    "date": "2022-09-29 01:17:49+01:00",
+    "platform": "Telegram"
+  },
+  ...
+]
+```
+
+Fields per message:
+- id_message (int): Unique message identifier
+- message (str | null): Text content in Spanish (CAN BE null/NaN - handle this!)
+- date (str): ISO timestamp with timezone
+- platform (str): "Telegram" or "Twitch"
+
+DATA PROCESSING INSTRUCTIONS:
+
+1. LOAD USER DATA:
+   - Read each JSON file as a list of message dictionaries
+   - User ID is the filename without .json extension
+
+2. HANDLE NULL MESSAGES:
+   - Some "message" fields are null/NaN - FILTER THESE OUT
+   - Example: {"message": NaN} should be skipped
+
+3. AGGREGATE USER MESSAGES:
+   - Concatenate all valid messages per user into a single text
+   - Consider keeping message order (chronological patterns may help)
+   - Option: Use separator like " [SEP] " between messages
+
+4. TEXT PREPROCESSING (suggested):
+   - Lowercase normalization
+   - Handle Spanish characters (ñ, á, é, í, ó, ú)
+   - Consider domain-specific vocabulary preservation
+   - Informal language, slang, profanity are common
+
+5. FEATURE EXTRACTION OPTIONS:
+   - TF-IDF with domain-specific vocabulary
+   - Spanish embeddings (BETO, RoBERTuito, multilingual models)
+   - Message count, temporal features, platform distribution
+
+LABEL DISTRIBUTION (train):
+- betting: 86 users (24.6%)
+- onlinegaming: 104 users (29.7%)
+- trading: 134 users (38.3%)
+- lootboxes: 26 users (7.4%)  <- MINORITY CLASS
+
+EVALUATION:
+Metric: Macro F1-Score
+Direction: Higher is better (maximize, range: 0.0 to 1.0)
+
+Macro F1 averages F1 scores across all 4 classes equally, regardless of class frequency.
+This is important given the severe class imbalance (lootboxes is underrepresented).
+
+Formula:
+  Macro-F1 = (1/4) * Σ F1_class
+  F1_class = 2 * (precision * recall) / (precision + recall)
+
+SUBMISSION FORMAT:
+File: submission.csv
+Columns: Subject,Type
+
+Example:
+```
+Subject,Type
+user4550,betting
+user4554,onlinegaming
+user4808,trading
+user482,lootboxes
+```
+
+CRITICAL NOTES:
+- Labels must be exactly: betting, onlinegaming, trading, lootboxes (lowercase)
+- All 160 test subjects must have a prediction
+- Handle class imbalance (lootboxes has only 26 training samples)
+- Spanish-specific models recommended (BETO, multilingual-BERT, etc.)
+- Consider data augmentation for minority class
+- Platform (Telegram vs Twitch) may correlate with addiction type

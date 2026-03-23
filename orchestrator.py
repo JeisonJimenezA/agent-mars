@@ -151,6 +151,13 @@ class MARSOrchestrator:
             # ----------------------------------------------------------
             success = self._generate_solution(new_node)
 
+            # ══════════════════════════════════════════════════════════
+            # Step 1.5: Register discovered models with MCTS (first time)
+            # ══════════════════════════════════════════════════════════
+            if self.iterations == 1 and self.idea_agent.discovered_models:
+                if not self.mcts.discovered_models:
+                    self.mcts.set_discovered_models(self.idea_agent.discovered_models)
+
             if not success:
                 self.log("Failed to generate solution, marking as buggy")
                 new_node.status = NodeStatus.BUGGY
@@ -229,6 +236,47 @@ class MARSOrchestrator:
                     self.stagnation_count = 0
                 self.last_best_metric = current_best
 
+            # ----------------------------------------------------------
+            # Step 9: Model rotation check (NEW)
+            #   If current model has stagnated for MODEL_STAGNATION_THRESHOLD
+            #   valid nodes, switch to the next unexplored model.
+            # ----------------------------------------------------------
+            if self.mcts.should_switch_model():
+                switched = self.mcts.switch_to_next_model()
+                if switched:
+                    self.log(f"Switched to model: {self.mcts.get_current_model_name()}")
+                    # Reset global stagnation counter for new model exploration
+                    self.stagnation_count = 0
+                elif self.mcts.models_exhausted:
+                    self.log("All models explored. Continuing with best-performing model.")
+
+            # ----------------------------------------------------------
+            # Step 10: Exploration Phase Update (NEW)
+            #   Track progress and trigger phase transitions for radical
+            #   strategy shifts after many iterations.
+            # ----------------------------------------------------------
+            current_best = self.mcts.best_metric if self.mcts.best_node else None
+            old_phase = self.idea_agent.current_phase
+            new_phase = self.idea_agent.update_exploration_state(
+                iteration=self.iterations,
+                current_best_metric=current_best,
+                model_exploration_stats=self.mcts.model_exploration_stats,
+                lower_is_better=self.lower_is_better,
+            )
+
+            if new_phase != old_phase:
+                self.log(f"EXPLORATION PHASE CHANGED: {old_phase.value} → {new_phase.value}")
+
+                # Handle RADICAL_PIVOT: trigger new SOTA search
+                from agents.idea_agent import ExplorationPhase
+                if new_phase == ExplorationPhase.RADICAL_PIVOT:
+                    self.log("Triggering radical SOTA re-search...")
+                    new_models = self.idea_agent.trigger_radical_search(self.problem_description)
+                    if new_models:
+                        # Register new models with MCTS
+                        self.mcts.set_discovered_models(self.idea_agent.discovered_models)
+                        self.log(f"Registered {len(new_models)} new models from radical search")
+
             # Save progress
             self._save_progress()
 
@@ -278,8 +326,17 @@ class MARSOrchestrator:
         with all logic inline. This avoids cross-module import mismatches that
         cause most runtime errors with GLM-5. Modular refactoring happens in
         IMPROVE iterations once a working baseline exists.
+
+        Enhanced with model-aware exploration: uses the model assigned by MCTS.
         """
-        idea = self._generate_idea()
+        # Get the model to use from MCTS
+        current_model = self.mcts.get_current_model()
+        current_model_index = self.mcts.current_model_index
+
+        idea = self._generate_idea(
+            force_model=current_model,
+            force_model_index=current_model_index,
+        )
         if not idea:
             return False
 
@@ -295,16 +352,46 @@ class MARSOrchestrator:
             module_descriptions={},
         )
 
-        self.log("Monolithic draft complete")
+        # ═══════════════════════════════════════════════════════════════
+        # Assign model info to node for tracking (NEW)
+        # ═══════════════════════════════════════════════════════════════
+        if current_model:
+            node.model_name = current_model.get("name", "Unknown")
+            node.model_index = current_model_index
+        else:
+            # Fallback: get from IdeaAgent
+            model_info, model_idx = self.idea_agent.get_last_used_model_info()
+            if model_info:
+                node.model_name = model_info.get("name", "Unknown")
+                node.model_index = model_idx
+
+        self.log(f"Monolithic draft complete (model: {node.model_name})")
         return True
 
-    def _generate_idea(self) -> Optional[str]:
-        """Generate or improve an idea using the IdeaAgent."""
-        if len(self.idea_agent.generated_ideas) == 0:
+    def _generate_idea(
+        self,
+        force_model: Optional[Dict] = None,
+        force_model_index: int = -1,
+    ) -> Optional[str]:
+        """
+        Generate or improve an idea using the IdeaAgent.
+
+        Args:
+            force_model: If provided, force this ML model for the idea
+            force_model_index: Index of the forced model
+        """
+        # Check if MCTS is forcing a new model (switched due to stagnation)
+        is_new_model = force_model is not None and force_model_index >= 0
+
+        # If new model OR first idea, generate initial idea with that model
+        if len(self.idea_agent.generated_ideas) == 0 or is_new_model:
+            self.log(f"Generating {'new model' if is_new_model else 'initial'} idea...")
             return self.idea_agent.generate_initial_idea(
                 self.problem_description,
                 self.eda_report,
-                [],
+                model_architectures=self.idea_agent.discovered_models,
+                force_model=force_model,
+                force_model_index=force_model_index,
             )
 
         best_solution_code = None
@@ -650,6 +737,19 @@ Provide code in a ```python block.
 
         self.log(f"Improving solution from parent node {parent.id}")
         self.log(f"  Parent metric: {parent.metric_value}")
+
+        # ═══════════════════════════════════════════════════════════════
+        # Inherit model info from parent (NEW)
+        # ═══════════════════════════════════════════════════════════════
+        if parent.model_name:
+            node.model_name = parent.model_name
+            node.model_index = parent.model_index
+        else:
+            # Fallback for legacy nodes without model info
+            current_model = self.mcts.get_current_model()
+            if current_model:
+                node.model_name = current_model.get("name", "Unknown")
+                node.model_index = self.mcts.current_model_index
 
         # Collect modification history from entire parent lineage
         lineage_mods: list = []
@@ -1597,6 +1697,20 @@ Rules:
         print(f"  Valid nodes: {mcts_stats['valid_nodes']}")
         print(f"  Buggy nodes: {mcts_stats['buggy_nodes']}")
 
+        # Model exploration statistics (NEW)
+        print(f"\nModel Exploration:")
+        print(f"  Total models discovered: {mcts_stats.get('total_models', 0)}")
+        print(f"  Models explored: {mcts_stats.get('models_explored', 0)}")
+        if self.mcts.discovered_models:
+            print(f"  Models detail:")
+            for idx, stats in self.mcts.model_exploration_stats.items():
+                model_name = self.mcts.discovered_models[int(idx)].get("name", "Unknown") if int(idx) < len(self.mcts.discovered_models) else "Unknown"
+                best = stats.get("best_metric")
+                valid = stats.get("valid_count", 0)
+                explored = "✓" if stats.get("explored", False) else "○"
+                best_str = f"{best:.6f}" if best is not None else "N/A"
+                print(f"    [{explored}] {model_name}: {valid} valid nodes, best={best_str}")
+
         lesson_stats = self.lesson_pool.get_statistics()
         print(f"\nLesson Statistics:")
         print(f"  Solution lessons: {lesson_stats['solution_lessons']}")
@@ -1606,6 +1720,7 @@ Rules:
             print(f"\nBest Solution:")
             print(f"  Node ID: {self.mcts.best_node.id}")
             print(f"  Metric: {self.mcts.best_node.metric_value}")
+            print(f"  Model: {self.mcts.best_node.model_name}")
             print(f"  Execution time: {self.mcts.best_node.execution_time:.1f}s")
 
     def _generate_tree_visualization(self):

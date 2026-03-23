@@ -70,7 +70,7 @@ class TreeNode:
     Node in the MCTS tree representing a solution state.
     Implements the Budget-Aware MCTS algorithm from the paper.
     """
-    
+
     def __init__(
         self,
         solution: Optional[Solution] = None,
@@ -83,30 +83,30 @@ class TreeNode:
         self.depth: int = depth
         self.parent: Optional[TreeNode] = parent
         self.children: List[TreeNode] = []
-        
+
         # Solution content
         self.solution: Solution = solution or Solution()
         self.action_type: Optional[ActionType] = action_type
-        
+
         # Execution state
         self.status: NodeStatus = NodeStatus.PENDING
         self.execution_result: Optional[ExecutionResult] = None
         self.execution_count: int = 0
-        
+
         # MCTS statistics
         self.visit_count: int = 0
         self.total_reward: float = 0.0
         self.q_value: float = 0.0  # Average reward
-        
+
         # Metrics
         self.metric_value: Optional[float] = None
         self.execution_time: float = 0.0
         self.time_limit: float = 5400.0  # Default 1.5 hours
-        
+
         # Timestamps
         self.created_at: float = time.time()
         self.executed_at: Optional[float] = None
-        
+
         # Expansion control
         self.improvement_attempts: int = 0  # Number of IMPROVE children
         self.debug_attempts: int = 0        # Number of DEBUG attempts
@@ -119,6 +119,14 @@ class TreeNode:
         # Inherited from parent and extended by each IMPROVE node so the improver
         # knows what has already been tried along this branch.
         self.applied_modifications: List[str] = []
+
+        # ═══════════════════════════════════════════════════════════════
+        # Model exploration tracking (NEW)
+        # ═══════════════════════════════════════════════════════════════
+        self.model_name: str = ""  # ML model used (e.g., "XGBoost", "CatBoost")
+        self.model_index: int = -1  # Index in discovered_models list
+        self.branch_valid_count: int = 0  # Valid iterations in this model branch
+        self.branch_best_metric: Optional[float] = None  # Best metric in this branch
     
     def add_child(self, child: 'TreeNode') -> 'TreeNode':
         """Add a child node"""
@@ -248,14 +256,19 @@ class TreeNode:
             "improvement_attempts": self.improvement_attempts,
             "debug_attempts": self.debug_attempts,
             "num_children": len(self.children),
+            # Model exploration tracking
+            "model_name": self.model_name,
+            "model_index": self.model_index,
+            "branch_valid_count": self.branch_valid_count,
+            "branch_best_metric": self.branch_best_metric,
         }
-        
+
         if include_solution:
             data["solution"] = self.solution.to_dict()
-        
+
         if self.execution_result:
             data["execution_result"] = self.execution_result.to_dict()
-        
+
         return data
     
     def __repr__(self) -> str:

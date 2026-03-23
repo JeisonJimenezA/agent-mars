@@ -30,7 +30,8 @@ class SearchAgent(BaseAgent):
     def search_sota_models(
         self,
         problem_description: str,
-        num_candidates: int = 5
+        num_candidates: int = 5,
+        alternative_search: bool = False,
     ) -> List[Dict[str, str]]:
         """
         Search for state-of-the-art model architectures for the task.
@@ -40,11 +41,13 @@ class SearchAgent(BaseAgent):
         Args:
             problem_description: Task description
             num_candidates: Number of model candidates to return
+            alternative_search: If True, use alternative queries for RADICAL_PIVOT phase
 
         Returns:
             List of dicts with 'name', 'reasoning', 'description'
         """
-        self.log(f"Searching for SOTA models (target: {num_candidates} candidates)")
+        search_type = "ALTERNATIVE" if alternative_search else "STANDARD"
+        self.log(f"Searching for SOTA models ({search_type}, target: {num_candidates} candidates)")
 
         # Step 1: Extract problem-specific keywords
         problem_keywords = self._extract_problem_keywords(problem_description)
@@ -58,7 +61,8 @@ class SearchAgent(BaseAgent):
         queries = self._generate_search_queries(
             task_info,
             problem_keywords,
-            problem_description
+            problem_description,
+            alternative=alternative_search,
         )
         self.log(f"  Generated {len(queries)} search queries")
         
@@ -209,13 +213,17 @@ Respond in JSON format:
         self,
         task_info: Dict[str, str],
         problem_keywords: Optional[Dict[str, str]] = None,
-        problem_description: Optional[str] = None
+        problem_description: Optional[str] = None,
+        alternative: bool = False,
     ) -> List[str]:
         """
         Generate targeted academic search queries using LLM based on full problem context.
 
         The LLM analyzes the problem and generates optimal search queries
         for Semantic Scholar, ArXiv, and Papers With Code.
+
+        Args:
+            alternative: If True, generate DIFFERENT queries for radical pivot search
 
         Returns list of search query strings.
         """
@@ -224,7 +232,39 @@ Respond in JSON format:
         domain = task_info.get("domain", "machine learning")
         task_type = task_info.get("task_type", "classification")
 
-        prompt = f"""Generate 7 highly specific academic search queries for finding state-of-the-art ML models to solve this challenge.
+        # Different prompt for alternative search (RADICAL_PIVOT phase)
+        if alternative:
+            prompt = f"""Generate 7 UNCONVENTIONAL academic search queries to find ALTERNATIVE approaches for this challenge.
+
+CONTEXT: Previous approaches have STAGNATED. We need RADICALLY DIFFERENT methods.
+
+PROBLEM CONTEXT:
+- Challenge Name: {pk.get('challenge_name', 'unknown')}
+- Task Type: {task_type}
+- Domain: {domain}
+- Evaluation Metric: {pk.get('metric_name', 'accuracy')}
+- Key Challenges: {pk.get('key_challenges', 'none')}
+
+REQUIREMENTS FOR ALTERNATIVE SEARCH:
+1. Look for COMPLETELY DIFFERENT approaches than standard {domain} methods
+2. Consider:
+   - Cross-domain transfer (e.g., if tabular: try NLP-inspired, if NLP: try CV-inspired)
+   - Unusual preprocessing (self-supervised, contrastive learning)
+   - Problem reframing (classification→ranking, regression→classification)
+   - Data augmentation and pseudo-labeling techniques
+   - Interpretable models vs black-box trade-offs
+   - Active learning or curriculum learning
+3. DO NOT search for the same models already tried
+4. Focus on recent papers (2023-2024) with novel approaches
+5. Include queries about "failure modes" or "limitations" of standard approaches
+
+Respond with a JSON array of exactly 7 ALTERNATIVE query strings:
+```json
+["query 1", "query 2", "query 3", "query 4", "query 5", "query 6", "query 7"]
+```
+"""
+        else:
+            prompt = f"""Generate 7 highly specific academic search queries for finding state-of-the-art ML models to solve this challenge.
 
 PROBLEM CONTEXT:
 - Challenge Name: {pk.get('challenge_name', 'unknown')}
