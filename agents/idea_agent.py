@@ -43,6 +43,100 @@ class ExplorationPhase(Enum):
     RADICAL_PIVOT = "radical_pivot"        # Reframe problem, new SOTA search
     ENSEMBLE_SYNTHESIS = "ensemble_synth"  # Combine best approaches found
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CREATIVE APPROACHES BLOCK - Encourages novel solutions
+# ═══════════════════════════════════════════════════════════════════════════
+CREATIVE_APPROACHES_BLOCK = """
+═══════════════════════════════════════════════════════════════════════════════
+THINK CREATIVELY - EXPLORE UNCONVENTIONAL APPROACHES
+═══════════════════════════════════════════════════════════════════════════════
+You are NOT limited to traditional ML pipelines. Consider these creative approaches:
+
+**LLM-BASED SOLUTIONS (often surprisingly effective!):**
+- Zero-shot classification: Use an LLM to directly classify/predict via prompting
+- Few-shot learning: Include examples in the prompt for in-context learning
+- Chain-of-thought: Have the LLM reason step-by-step before predicting
+- LLM as feature extractor: Generate embeddings or semantic features
+- LLM for data augmentation: Generate synthetic training examples
+- LLM ensemble: Multiple prompts voting on the answer
+
+**HYBRID APPROACHES:**
+- LLM + Traditional ML: Use LLM features as input to XGBoost/RF
+- Two-stage: LLM for preprocessing/feature extraction, ML for prediction
+- LLM for hard cases: Route difficult samples to LLM, easy ones to fast model
+- Prompt-tuning + fine-tuning combination
+
+**UNCONVENTIONAL TECHNIQUES:**
+- Problem reframing: Classification as ranking, regression as classification
+- Self-training / pseudo-labeling with confidence thresholds
+- Data programming / weak supervision with labeling functions
+- Active learning simulation: Focus on uncertain samples
+- Retrieval-augmented prediction: Find similar examples at inference
+- Rule-based systems + ML fallback
+- Symbolic AI + neural hybrid
+
+**CREATIVE DATA STRATEGIES:**
+- Synthetic data generation (LLM, SMOTE variants, mixup)
+- Cross-domain transfer learning
+- Multi-task learning with auxiliary objectives
+- Contrastive learning for better representations
+- Knowledge distillation from larger models
+
+**META-LEARNING:**
+- AutoML-style hyperparameter search within the solution
+- Neural architecture search concepts
+- Learning to learn from the problem structure
+
+BE BOLD! The best solutions often come from unexpected combinations.
+If traditional approaches plateau, TRY SOMETHING RADICALLY DIFFERENT.
+═══════════════════════════════════════════════════════════════════════════════
+"""
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LLM AUTONOMOUS CAPABILITIES BLOCK
+# ═══════════════════════════════════════════════════════════════════════════
+LLM_CAPABILITIES_BLOCK = """
+═══════════════════════════════════════════════════════════════════════════════
+YOUR AUTONOMOUS CAPABILITIES
+═══════════════════════════════════════════════════════════════════════════════
+You can request actions by including these markers in your response.
+The system will evaluate your suggestions and execute valid ones.
+
+1. REQUEST ADDITIONAL MODEL SEARCH:
+   If you believe exploring different models/techniques would help:
+   @@ACTION:SEARCH_MODELS:{"keywords": ["keyword1", "keyword2"]}@@
+
+2. SUGGEST MODEL SWITCH:
+   If you think a different model family would work better:
+   @@ACTION:SWITCH_MODEL:{"model_name": "ModelName", "reason": "why this model fits better"}@@
+
+3. REQUEST PHASE CHANGE:
+   If current exploration approach doesn't fit:
+   @@ACTION:CHANGE_PHASE:{"phase": "RADICAL_PIVOT", "reason": "why change is needed"}@@
+   Valid phases: BREADTH_SEARCH, DEEP_EXPLOIT, RADICAL_PIVOT, ENSEMBLE_SYNTHESIS
+
+4. REQUEST SPECIFIC LESSONS:
+   If you need lessons about specific topics:
+   @@ACTION:FILTER_LESSONS:{"keywords": ["topic1", "topic2"], "count": 10}@@
+
+5. SIGNAL CONVERGENCE:
+   If you believe the search has converged (plateau detected):
+   @@ACTION:SIGNAL_CONVERGENCE:{"confidence": 0.9, "reason": "metric stable for N iterations"}@@
+
+6. REQUEST ANALYSIS:
+   If you need additional data analysis:
+   @@ACTION:REQUEST_ANALYSIS:{"type": "feature_importance"}@@
+   Valid types: feature_importance, correlation, distribution, missing_values
+
+GUIDELINES:
+- Use actions when you have STRONG REASONING (explain why in the "reason" field)
+- You can include UP TO 3 actions per response
+- Actions are SUGGESTIONS - the system decides whether to accept
+- Continue with your normal response after including actions
+═══════════════════════════════════════════════════════════════════════════════
+"""
+
 class IdeaAgent(BaseAgent):
     """
     Agent responsible for generating solution ideas.
@@ -295,7 +389,8 @@ class IdeaAgent(BaseAgent):
         phase_guidance = self.get_phase_guidance()
 
         # Inject phase guidance + curriculum guidance + novelty constraint at the start
-        prompt = f"{phase_guidance}\n\n{curriculum_guidance}\n\n{novelty_block}\n\n{prompt}"
+        # And LLM capabilities at the end
+        prompt = f"{phase_guidance}\n\n{curriculum_guidance}\n\n{novelty_block}\n\n{prompt}\n\n{LLM_CAPABILITIES_BLOCK}"
 
         # ══════════════════════════════════════════════════════════════
         # TEMPERATURE ADJUSTMENT BY STAGE
@@ -379,43 +474,69 @@ class IdeaAgent(BaseAgent):
         Get curriculum guidance text to inject into the prompt.
 
         Each stage guides the agent toward appropriate complexity.
+        NOW INCLUDES creative and unconventional approaches at every stage.
         """
         guidance = {
             CurriculumStage.BASELINE: """
 == CURRICULUM STAGE: BASELINE ==
-Focus on SIMPLE, PROVEN approaches:
-- Choose the most appropriate model family for this specific problem
-- Minimal feature engineering
-- Standard preprocessing (scaling, encoding)
-- Prioritize simplicity and fast iteration
-- Goal: Establish a solid baseline that works reliably
+Focus on SIMPLE approaches that WORK:
+- Traditional ML: Choose appropriate model family (tree-based, linear, neural)
+- **OR try LLM-based**: Zero-shot classification with good prompting can beat complex ML!
+- Minimal preprocessing, let the model handle complexity
+- Quick iteration, fail fast
+- Goal: Get a WORKING solution, conventional OR creative
 """,
             CurriculumStage.STANDARD: """
 == CURRICULUM STAGE: STANDARD ==
-Now explore STANDARD ML techniques:
-- Try different model families based on problem characteristics
-- Basic feature engineering (interactions, transformations)
-- Hyperparameter tuning (grid/random search)
-- Cross-validation strategies
-- Goal: Improve upon baseline with standard techniques
+Explore DIVERSE approaches - both traditional AND creative:
+
+TRADITIONAL PATH:
+- Different model families (XGBoost, RandomForest, Neural Nets)
+- Feature engineering, hyperparameter tuning
+
+CREATIVE PATH (try these!):
+- LLM few-shot learning: Include examples in prompt
+- LLM as feature extractor: Generate semantic embeddings
+- Hybrid: LLM features + traditional ML classifier
+- Problem reframing: Is this really classification? Could be ranking/similarity
+
+Goal: Find what WORKS BEST, don't limit yourself to conventional ML
 """,
             CurriculumStage.ADVANCED: """
 == CURRICULUM STAGE: ADVANCED ==
-Time for ADVANCED optimizations:
-- Advanced feature engineering (target encoding, embeddings)
-- Model-specific optimizations (learning rate schedules, regularization)
-- Advanced preprocessing (dimensionality reduction, feature selection)
-- Domain-specific techniques
-- Goal: Push performance with sophisticated techniques
+Time for SOPHISTICATED and UNCONVENTIONAL techniques:
+
+ADVANCED ML:
+- Target encoding, learned embeddings
+- Neural architecture customization
+- Advanced regularization, learning schedules
+
+CREATIVE TECHNIQUES (highly encouraged!):
+- Chain-of-thought prompting: Have LLM reason step-by-step
+- Retrieval-augmented: Find similar examples at inference time
+- Self-training: Use confident predictions as pseudo-labels
+- LLM ensemble: Multiple prompts voting on answer
+- Data augmentation via LLM: Generate synthetic examples
+- Two-stage: LLM for feature extraction, fast model for prediction
+
+Goal: Push boundaries with creative combinations
 """,
             CurriculumStage.ENSEMBLE: """
 == CURRICULUM STAGE: ENSEMBLE ==
-Explore ENSEMBLE and META-LEARNING strategies:
-- Model stacking (multiple layers of models)
-- Blending (weighted averaging of predictions)
-- Diverse model ensembles (different algorithms, different features)
-- Out-of-fold predictions for second-level models
-- Goal: Maximize performance through model combination
+COMBINE the best of ALL worlds:
+
+TRADITIONAL ENSEMBLES:
+- Model stacking, blending, voting
+- Diverse base models (different algorithms, features)
+
+CREATIVE ENSEMBLES (the winning edge!):
+- LLM + ML ensemble: LLM votes alongside traditional models
+- Confidence-based routing: Hard cases to LLM, easy to fast model
+- Multi-prompt ensemble: Different prompting strategies
+- Knowledge distillation: Train small model on LLM predictions
+- Symbolic + Neural: Rule-based for clear cases, ML for fuzzy
+
+Goal: Maximum performance through creative model combination
 """,
         }
         return guidance.get(stage, "")
@@ -520,24 +641,31 @@ DATA INSIGHTS:
 {models_context}
 
 YOUR TASK:
-Propose a SIMPLE baseline approach. Consider:
-- What type of problem is this? (classification, regression, etc.)
-- What preprocessing is needed?
-- Which model from the recommendations above would work well?
-- How to evaluate the solution?
+Propose a solution approach. You have FULL CREATIVE FREEDOM - consider:
+- What type of problem is this? (classification, regression, ranking, etc.)
+- What's the BEST approach? Traditional ML? LLM-based? Hybrid?
+- Could an LLM solve this directly via prompting? (often surprisingly effective!)
+- What preprocessing is needed - or can you skip it entirely?
 
 IMPORTANT:
-- Start with the BASELINE MODEL recommendation if provided
-- Keep it simple and fast to implement
-- Focus on a working solution, not perfection
-- Be specific about the model architecture to use
+- You are NOT limited to traditional ML pipelines
+- LLM-based solutions (zero-shot, few-shot, chain-of-thought) are VALID and often BETTER
+- Hybrid approaches (LLM + ML) can combine the best of both worlds
+- If a model is recommended, consider it but feel free to propose alternatives
+- Be CREATIVE - unexpected approaches often win
 {model_instruction}
-Describe your solution idea in 5-8 sentences. Include:
-1. Problem type and approach
-2. Specific model/architecture to use
-3. Key preprocessing steps
-4. Training strategy
-5. Evaluation approach
+
+Describe your solution idea in 5-10 sentences. Include:
+1. Problem type and chosen approach (traditional ML / LLM-based / hybrid / other)
+2. Specific model/technique to use and WHY
+3. If LLM-based: prompting strategy (zero-shot, few-shot, chain-of-thought)
+4. Key preprocessing or data handling
+5. Training/inference strategy
+6. Why you believe this approach will work well
+
+{CREATIVE_APPROACHES_BLOCK}
+
+{LLM_CAPABILITIES_BLOCK}
 """
 
         return prompt
@@ -778,67 +906,122 @@ Describe your solution idea in 5-8 sentences. Include:
 
         This is injected into the idea generation prompt to steer
         the LLM toward the appropriate strategy.
+
+        NOW INCLUDES creative/unconventional approaches at every phase.
         """
         guidance = {
             ExplorationPhase.BREADTH_SEARCH: """
 ═══════════════════════════════════════════════════════════════════════════════
 EXPLORATION PHASE: BREADTH SEARCH
 ═══════════════════════════════════════════════════════════════════════════════
-Strategy: Explore DIVERSE model families to find promising directions.
+Strategy: Explore FUNDAMENTALLY DIFFERENT approaches - both traditional AND creative.
+
+MUST TRY (diversity is key):
+- Traditional ML: XGBoost, RandomForest, Neural Nets, Linear models
+- **LLM-BASED**: Zero-shot prompting, few-shot learning (HIGHLY RECOMMENDED!)
+- **HYBRID**: LLM features + traditional classifier
+
+Why try LLM-based?
+- Zero-shot can beat fine-tuned models on many tasks
+- No training data needed - works immediately
+- Understands context and semantics naturally
 
 Rules:
-- Try different model architectures (not just variations of the same model)
-- Keep implementations relatively simple
-- Focus on understanding what works for this problem type
-- Document clearly what each approach does well/poorly
+- Each attempt should be FUNDAMENTALLY different
+- Don't just tune hyperparameters - try completely different paradigms
+- LLM solutions count as valid exploration!
 ═══════════════════════════════════════════════════════════════════════════════
 """,
             ExplorationPhase.DEEP_EXPLOIT: f"""
 ═══════════════════════════════════════════════════════════════════════════════
 EXPLORATION PHASE: DEEP EXPLOITATION
 ═══════════════════════════════════════════════════════════════════════════════
-Strategy: Focus on EXPLOITING the best-performing approaches with deeper tuning.
+Strategy: OPTIMIZE the best approaches found so far.
 
-TOP MODELS TO FOCUS ON:
+TOP PERFORMERS TO FOCUS ON:
 {self._format_top_models()}
 
-Rules:
-- Stick to the top-performing model families
-- Focus on hyperparameter optimization
-- Try advanced feature engineering for these specific models
-- Experiment with training strategies (learning rate schedules, early stopping)
-- Do NOT switch to completely different model families
+For TRADITIONAL ML approaches:
+- Hyperparameter optimization (Optuna, grid search)
+- Feature engineering specific to this model
+- Training tricks (learning rate schedules, regularization)
+
+For LLM-BASED approaches (if they worked well):
+- Prompt engineering: Refine the prompt structure
+- Few-shot optimization: Better example selection
+- Chain-of-thought: Add reasoning steps
+- Output parsing: Better structured extraction
+
+For HYBRID approaches:
+- Balance between LLM and ML components
+- Feature fusion strategies
 ═══════════════════════════════════════════════════════════════════════════════
 """,
             ExplorationPhase.RADICAL_PIVOT: """
 ═══════════════════════════════════════════════════════════════════════════════
-EXPLORATION PHASE: RADICAL PIVOT
+EXPLORATION PHASE: RADICAL PIVOT - BE WILDLY CREATIVE!
 ═══════════════════════════════════════════════════════════════════════════════
-Strategy: FUNDAMENTALLY CHANGE the approach. Previous strategies have plateaued.
+Previous approaches have PLATEAUED. Time to think COMPLETELY DIFFERENTLY.
 
-Rules:
-- Reframe the problem (e.g., classification→ranking, regression→classification)
-- Try completely different preprocessing (different normalization, embeddings)
-- Consider domain-specific techniques not tried before
-- Look at the problem from a different angle
-- If tabular: try deep learning. If deep learning: try gradient boosting
-- Consider data augmentation or pseudo-labeling
-- Think: "What would a domain expert do differently?"
+RADICAL IDEAS TO TRY:
+
+1. **FLIP THE PARADIGM**:
+   - If using ML → try pure LLM prompting
+   - If using LLM → try simple rule-based + ML
+   - Classification → Ranking/Similarity
+   - Supervised → Self-supervised + pseudo-labels
+
+2. **LLM CREATIVE TECHNIQUES**:
+   - Chain-of-thought with self-consistency (multiple reasoning paths)
+   - Tree-of-thought (explore multiple solution branches)
+   - LLM as judge (generate, then self-evaluate)
+   - Debate: Two LLM instances argue for different answers
+   - Reflection: LLM critiques and improves its own answer
+
+3. **UNCONVENTIONAL APPROACHES**:
+   - Retrieval-augmented: Find similar examples dynamically
+   - Data programming: Write labeling functions
+   - Active learning simulation: Focus on hard cases
+   - Symbolic AI + Neural hybrid
+   - Multi-task: Add auxiliary objectives
+
+4. **CREATIVE DATA STRATEGIES**:
+   - LLM-generated synthetic data
+   - Cross-domain transfer from unexpected sources
+   - Contrastive learning for representations
+
+THE CRAZIER THE IDEA, THE BETTER. Standard approaches have failed!
 ═══════════════════════════════════════════════════════════════════════════════
 """,
             ExplorationPhase.ENSEMBLE_SYNTHESIS: """
 ═══════════════════════════════════════════════════════════════════════════════
-EXPLORATION PHASE: ENSEMBLE SYNTHESIS
+EXPLORATION PHASE: ENSEMBLE SYNTHESIS - COMBINE EVERYTHING
 ═══════════════════════════════════════════════════════════════════════════════
-Strategy: COMBINE the best approaches found throughout the search.
+Strategy: Create POWERFUL COMBINATIONS of all successful approaches.
 
-Rules:
-- Create ensembles of top-performing models
-- Use stacking with diverse base models
-- Try blending with optimized weights
-- Use out-of-fold predictions for second-level models
-- Focus on model diversity in ensembles (different algorithms, different features)
-- The goal is to extract maximum value from what we've learned
+ENSEMBLE STRATEGIES:
+
+1. **TRADITIONAL ENSEMBLES**:
+   - Stacking: Train meta-model on base predictions
+   - Blending: Weighted average of models
+   - Voting: Majority/soft voting
+
+2. **LLM + ML ENSEMBLES** (often the winning combo!):
+   - LLM as one voter alongside ML models
+   - Confidence-based routing: Hard cases → LLM, easy → fast ML
+   - LLM for edge cases, ML for bulk predictions
+   - LLM as tie-breaker when models disagree
+
+3. **MULTI-PROMPT ENSEMBLES**:
+   - Different prompting strategies voting
+   - Temperature diversity: Same prompt, different temperatures
+   - Perspective diversity: Different personas/viewpoints
+
+4. **KNOWLEDGE DISTILLATION**:
+   - Train fast model on LLM predictions
+   - Combine distilled model with original LLM
+
+Goal: Maximum performance by combining the BEST of traditional AND creative approaches!
 ═══════════════════════════════════════════════════════════════════════════════
 """,
         }

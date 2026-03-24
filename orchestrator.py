@@ -11,6 +11,8 @@ from core.config import Config
 from utils.debug_logger import get_debug_logger
 from core.mcts import MCTSEngine
 from core.tree_node import TreeNode, Solution, ActionType, NodeStatus, ExecutionResult
+from core.llm_action_parser import LLMActionParser, LLMAction, ActionResult
+from core.llm_action_executor import LLMActionExecutor
 from memory.lesson_pool import LessonPool
 from memory.lesson_extractor import LessonExtractor
 from memory.lesson_types import LessonType
@@ -86,6 +88,13 @@ class MARSOrchestrator:
         self.executor = Executor(ExecutionConfig(timeout=7200))
         self.validator = SolutionValidator()
         self.debug_logger = get_debug_logger()
+
+        # ═══════════════════════════════════════════════════════════════
+        # LLM Autonomous Actions System (NEW)
+        # ═══════════════════════════════════════════════════════════════
+        self.action_parser = LLMActionParser()
+        self.action_executor = LLMActionExecutor(working_dir=str(self.working_dir))
+        self.action_executor.set_orchestrator(self)
 
         # Statistics
         self.start_time = 0
@@ -376,6 +385,9 @@ class MARSOrchestrator:
         """
         Generate or improve an idea using the IdeaAgent.
 
+        Now includes LLM action processing: parses the response for action
+        requests and executes them as suggestions.
+
         Args:
             force_model: If provided, force this ML model for the idea
             force_model_index: Index of the forced model
@@ -386,30 +398,88 @@ class MARSOrchestrator:
         # If new model OR first idea, generate initial idea with that model
         if len(self.idea_agent.generated_ideas) == 0 or is_new_model:
             self.log(f"Generating {'new model' if is_new_model else 'initial'} idea...")
-            return self.idea_agent.generate_initial_idea(
+            idea = self.idea_agent.generate_initial_idea(
                 self.problem_description,
                 self.eda_report,
                 model_architectures=self.idea_agent.discovered_models,
                 force_model=force_model,
                 force_model_index=force_model_index,
             )
+        else:
+            best_solution_code = None
+            if self.mcts.best_node and self.mcts.best_node.solution:
+                files = self.mcts.best_node.solution.get_all_files()
+                best_solution_code = "\n\n".join(
+                    f"=== {fname} ===\n{code}" for fname, code in files.items()
+                )
 
-        best_solution_code = None
-        if self.mcts.best_node and self.mcts.best_node.solution:
-            files = self.mcts.best_node.solution.get_all_files()
-            best_solution_code = "\n\n".join(
-                f"=== {fname} ===\n{code}" for fname, code in files.items()
+            idea = self.idea_agent.improve_idea(
+                self.problem_description,
+                self.eda_report,
+                self.lesson_pool,
+                previous_ideas=self.idea_agent.generated_ideas,
+                valid_solutions_count=self.valid_solutions_count,
+                stagnation_count=self.stagnation_count,
+                best_solution_code=best_solution_code,
             )
 
-        return self.idea_agent.improve_idea(
-            self.problem_description,
-            self.eda_report,
-            self.lesson_pool,
-            previous_ideas=self.idea_agent.generated_ideas,
-            valid_solutions_count=self.valid_solutions_count,
-            stagnation_count=self.stagnation_count,
-            best_solution_code=best_solution_code,
-        )
+        # ═══════════════════════════════════════════════════════════════
+        # Process LLM Action Requests (NEW)
+        # ═══════════════════════════════════════════════════════════════
+        if idea:
+            idea, action_results = self._process_llm_actions(idea)
+            if action_results:
+                self.log(f"Processed {len(action_results)} LLM action(s)")
+
+        return idea
+
+    def _process_llm_actions(
+        self,
+        response: str,
+        node_id: Optional[str] = None
+    ) -> tuple:
+        """
+        Parse LLM response for action requests and execute them.
+
+        All actions are treated as SUGGESTIONS that the system evaluates
+        before deciding whether to accept.
+
+        Args:
+            response: Full LLM response text
+            node_id: Optional node ID for logging
+
+        Returns:
+            Tuple of (clean_response, list of ActionResults)
+        """
+        # Parse actions from response
+        actions = self.action_parser.parse(response)
+
+        if not actions:
+            return response, []
+
+        results = []
+        for action in actions:
+            # Validate action parameters
+            if not self.action_parser.validate(action):
+                self.log(f"  [Action] Rejected (invalid): {action.action_type.value} - {action.rejection_reason}")
+                continue
+
+            # Execute action
+            result = self.action_executor.execute(
+                action,
+                iteration=self.iterations,
+                node_id=node_id,
+            )
+            results.append(result)
+
+            # Log result
+            status = "OK" if result.success else "REJECTED"
+            self.log(f"  [Action] {action.action_type.value}: {status} - {result.message[:80]}")
+
+        # Extract clean content (without action markers)
+        clean_response = self.action_parser.extract_content(response)
+
+        return clean_response, results
 
     def _generate_monolithic_script(self, idea: str) -> Optional[str]:
         """

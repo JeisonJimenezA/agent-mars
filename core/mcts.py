@@ -399,6 +399,17 @@ class MCTSEngine:
         if elapsed >= self.time_budget:
             print(f"Time budget exceeded ({elapsed:.1f}s >= {self.time_budget}s)")
             return True
+
+        # Check for LLM convergence signal (early stopping)
+        if self.is_convergence_signaled():
+            # Only stop if we have at least some valid solutions
+            valid_count = sum(1 for n in self.explored_nodes if n.status == NodeStatus.VALID)
+            if valid_count >= 3:
+                print(f"[MCTS] Early stopping due to LLM convergence signal ({valid_count} valid solutions)")
+                return True
+            else:
+                print(f"[MCTS] Convergence signaled but only {valid_count} valid solutions - continuing")
+
         return False
     
     def _log_iteration(self, parent: TreeNode, child: TreeNode):
@@ -618,3 +629,75 @@ class MCTSEngine:
             "current_model_index": self.current_model_index,
             "models_exhausted": self.models_exhausted,
         }
+
+    # ═══════════════════════════════════════════════════════════════
+    # LLM Autonomous Actions Support (NEW)
+    # ═══════════════════════════════════════════════════════════════
+
+    def request_model_switch(self, target_index: int, reason: str = "") -> bool:
+        """
+        Handle LLM's request to switch to a different model.
+
+        This is a SUGGESTION - the system validates before accepting.
+
+        Args:
+            target_index: Index of target model in discovered_models
+            reason: LLM's reason for the suggestion
+
+        Returns:
+            True if switch was accepted, False otherwise
+        """
+        if not self.discovered_models:
+            print(f"[MCTS] Model switch rejected: no models discovered")
+            return False
+
+        if target_index < 0 or target_index >= len(self.discovered_models):
+            print(f"[MCTS] Model switch rejected: invalid index {target_index}")
+            return False
+
+        if target_index == self.current_model_index:
+            print(f"[MCTS] Model switch rejected: already on model {target_index}")
+            return False
+
+        # Accept the switch
+        old_name = self.get_current_model_name()
+        self.current_model_index = target_index
+        new_name = self.get_current_model_name()
+
+        print(f"[MCTS] Model switch accepted (LLM suggestion): '{old_name}' -> '{new_name}'")
+        print(f"       Reason: {reason}")
+
+        # Force root reactivation for new DRAFT with new model
+        self.root.is_fully_expanded = False
+
+        # Reset stagnation counter for the new model
+        if target_index in self.model_exploration_stats:
+            self.model_exploration_stats[target_index]["stagnant_count"] = 0
+
+        return True
+
+    def signal_convergence(self) -> bool:
+        """
+        Handle LLM's signal that search has converged.
+
+        Sets a flag that _should_stop() will check, but doesn't immediately
+        stop the search (allows current iteration to complete).
+
+        Returns:
+            True if signal was accepted
+        """
+        if not hasattr(self, '_convergence_signaled'):
+            self._convergence_signaled = False
+
+        if self._convergence_signaled:
+            print("[MCTS] Convergence already signaled")
+            return False
+
+        self._convergence_signaled = True
+        print("[MCTS] Convergence signal received from LLM - will consider early stopping")
+
+        return True
+
+    def is_convergence_signaled(self) -> bool:
+        """Check if convergence has been signaled."""
+        return getattr(self, '_convergence_signaled', False)

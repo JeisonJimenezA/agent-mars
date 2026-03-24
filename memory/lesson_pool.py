@@ -269,3 +269,96 @@ class LessonPool:
         self._lesson_counter.clear()
         self.total_added = 0
         self.total_deduplicated = 0
+
+    # ═══════════════════════════════════════════════════════════════
+    # LLM Autonomous Actions Support (NEW)
+    # ═══════════════════════════════════════════════════════════════
+
+    def filter_by_keywords(
+        self,
+        keywords: List[str],
+        count: int = 10,
+        lesson_type: Optional[LessonType] = None
+    ) -> List[Lesson]:
+        """
+        Filter lessons by keywords (case-insensitive).
+
+        Used by LLM action executor when LLM requests specific lessons.
+
+        Args:
+            keywords: List of keywords to search for
+            count: Maximum number of lessons to return
+            lesson_type: Filter by type (None = all)
+
+        Returns:
+            List of matching lessons, sorted by relevance (match count)
+        """
+        if not keywords:
+            return []
+
+        # Normalize keywords
+        keywords_lower = [k.lower() for k in keywords]
+
+        # Get pool to search
+        if lesson_type == LessonType.SOLUTION:
+            pool = self.solution_lessons
+        elif lesson_type == LessonType.DEBUG:
+            pool = self.debug_lessons
+        else:
+            pool = self.solution_lessons + self.debug_lessons
+
+        # Filter by challenge if applicable
+        if self.challenge_name:
+            pool = [l for l in pool if not l.challenge_name or l.challenge_name == self.challenge_name]
+
+        # Score each lesson by keyword matches
+        scored = []
+        for lesson in pool:
+            # Build searchable text from lesson
+            search_text = " ".join([
+                lesson.title or "",
+                getattr(lesson, "key_lesson", "") or "",
+                getattr(lesson, "error_type", "") or "",
+                getattr(lesson, "fix_description", "") or "",
+            ]).lower()
+
+            # Count keyword matches
+            match_count = sum(1 for kw in keywords_lower if kw in search_text)
+
+            if match_count > 0:
+                scored.append((lesson, match_count))
+
+        # Sort by match count (descending), then by timestamp (newest first)
+        scored.sort(key=lambda x: (x[1], x[0].timestamp), reverse=True)
+
+        # Return top N lessons
+        return [lesson for lesson, _ in scored[:count]]
+
+    def format_filtered_lessons(
+        self,
+        keywords: List[str],
+        count: int = 10,
+        lesson_type: Optional[LessonType] = None
+    ) -> str:
+        """
+        Filter and format lessons for LLM action response.
+
+        Args:
+            keywords: Keywords to filter by
+            count: Max lessons
+            lesson_type: Filter by type
+
+        Returns:
+            Formatted string of matching lessons
+        """
+        lessons = self.filter_by_keywords(keywords, count, lesson_type)
+
+        if not lessons:
+            return f"No lessons found matching keywords: {keywords}"
+
+        formatted = [f"Found {len(lessons)} lessons matching: {keywords}\n"]
+        for lesson in lessons:
+            formatted.append(lesson.format_for_prompt())
+            formatted.append("")
+
+        return "\n".join(formatted)
